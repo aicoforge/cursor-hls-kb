@@ -1,0 +1,678 @@
+---
+description: HLS iteration recording workflow: complete_iteration API, Front-Capture, rule binding strategy, rollback structure (Section 7)
+alwaysApply: true
+---
+# Copyright (c) 2026 AICOFORGE. All rights reserved.
+# CC BY-NC 4.0 — non-commercial use only. See LICENSE.
+# Commercial use: kevinjan@aicoforge.com
+
+################################################################################
+# Section 7. Design Iteration Recording & Automation
+################################################################################
+
+## Iterative Improvement Workflow (Main Flow)
+
+**Core principle**: After each successful HLS synthesis, **automatically** record to the Knowledge Base (no user prompt needed). If csim or csynth fails, skip recording.
+
+```
+ 1. Front-Capture    Scan user messages each round, maintain USER_REF_CODE / USER_SPEC
+ 2. Query KB         Two-track query: similar (Track 1) + rules/effective (Track 2) → see Section 5
+ 3. Bind Rules       Bind rules, maintain APPLIED_RULES (rule_code+rule_text or plain rule_text) → see "Rule Binding Strategy" below
+ 4. Determine baseline  Determine previous_ii → see 「previous_ii Baseline Definition」 below
+ 5. Propose          Propose optimization approach based on KB knowledge and user input → see Section 5 "Dual-Track Query Result Summary"
+ 6. Write Code       Write code + pragma comments (do not write file header comment at this stage) → see Section 4 During, Section 6 Pragma Comments
+ 7. Synthesize       csim + csynth (either failure → stop, do not record) → see Section 4 After
+ 8. Parse & Header   ┐  Parse csynth report, fill in complete header comment all at once (measured values) → see Section 6
+ 9. Query project_id ├─ Correspond to Post-Synthesis Step 1–5 ── use GET /api/projects?type= + project_name exact match → see Step 2 below
+10. Record to KB     │  Call complete_iteration API → see Step 3–4 below
+11. Document Local   ┘  Create/update optimization_summary.md and other local documentation (regardless of API success)
+12. Iterate          If II has not reached target, use current results as basis for a new two-track query (carry this iteration's current_ii forward as the next round's previous_ii per Layer 1; main flow step 12 naturally produces this value), select the best pragma combination from untried ones, return to step 2 (skip step 1 if user input unchanged)
+```
+
+> ❗ **project_id only source**: `GET /api/projects?type={type}` + `project_name` exact match. **Prohibited**: Taking project_id from `/api/design/similar` (may select the wrong project when multiple projects of the same type exist).
+
+---
+
+## User Input Front-Capture
+
+**Before each conversation round response**, scan the current and all previous messages, using semantic understanding (not keyword matching) to continuously maintain:
+
+**USER_REF_CODE** (user's final reference code):
+- New complete code → overwrite; supplementary fragment → append; not provided → keep previous value
+
+**USER_SPEC** (accumulated performance requirements/constraints):
+- New constraint → merge (e.g., `"II=1"` + `"DSP≤10"` → `"II=1, DSP≤10"`)
+- Correction → update corresponding item; not mentioned → keep previous value
+
+**Example**:
+```
+User message 1: "Help me optimize this FIR filter" (pasted C code)
+  → USER_REF_CODE = user's pasted code, USER_SPEC = null
+User message 2: "Target II=1, latency under 20ns"
+  → USER_SPEC = "II=1, latency<20ns"
+User message 3: "DSP must not exceed 10"
+  → USER_SPEC = "II=1, latency<20ns, DSP≤10" (accumulated merge)
+```
+
+**II_TARGET Determination** (dynamically extracted from USER_SPEC, not a fixed environment value):
+- If the user explicitly specifies an II target in conversation (e.g., `"target II=1"`, `"II≤4"`, `"II=2 is enough"`), extract that value from USER_SPEC as `ii_target`
+- If the user does not specify an II target, default to `ii_target = 1` (optimal throughput)
+- When the user later modifies the II target, update the II value in USER_SPEC; subsequent iterations use the new value
+- This value is dynamically filled into the `ii_target` field each time the `complete_iteration` API is called (marked as `II_TARGET_FROM_USER_SPEC` in the template)
+
+> ❗ **APPLIED_RULES** does not belong to Front-Capture (KB has not been queried at this stage). APPLIED_RULES maintenance begins in the Bind Rules phase; see "Rule Binding Strategy" below.
+
+**reference_metadata auto-generation**: Infer language from USER_REF_CODE (`{"language":"c"}` / `"cpp"` / `"pseudocode"}`, or `{"has_specification":true}`, or `null`). Every iteration: append `ii_top` + `ii_top_previous`. First iteration Layer 2: also append `previous_ii_source` + `previous_ii_basis`. Full field list → see 「previous_ii Baseline Definition」.
+
+---
+
+## Rule Binding Strategy (Bind Rules → Maintain APPLIED_RULES)
+
+> ❗ **Name distinction**:
+> - `APPLIED_RULES`: Cursor workflow's **internal variable**, holding both types of entries (with/without rule_code), maintained during the Bind Rules phase
+> - `rules_applied`: `complete_iteration` API's **request field**, **only contains entries with rule_code**
+> - These are different and must not be mixed
+
+APPLIED_RULES is a mixed container, simultaneously holding "rule_code + rule_text" and "plain rule_text" entries. Rule matching is performed by Cursor before recording (semantic matching); the API side only performs exact `rule_code` lookup.
+
+**Binding priority**:
+
+```
+Layer 1: rule_code exact binding (100% accurate)
+  Source: Directly retrieved during Track 2 query / explicitly specified by user / extracted from historical code_snapshot Applied Rules
+
+Layer 2: Cursor semantic matching of rule_text
+  1. Follow Track 2 query flow (Section 5): infer Category → query rules → semantic filter → statistical sort
+  2. Confident → take rule_code and fill into rules_applied
+  3. Not confident → proceed to "No match"
+
+No match → do not fill rules_applied (rules_effectiveness not updated)
+  But still record in approach_description + code_snapshot header Applied Rules as plain text
+```
+
+Maintain APPLIED_RULES continuously each round: Track 2 selected → record rule_code + rule_text; user describes technique → semantic match; cannot confirm → record plain rule_text.
+
+### Flow of APPLIED_RULES, rules_applied, and header comment Applied Rules
+
+```
+APPLIED_RULES (mixed container maintained during Bind Rules phase)
+│
+├── Entries with rule_code (rule_code + rule_text)
+│     ├──→ rules_applied[] (API field) → simultaneously updates rules_effectiveness statistics and _rules_applied (reference_metadata) (exact same scope as statistics)
+│     ├──→ header comment Applied Rules: "P00X: rule_text" format
+│     └──→ approach_description: technique name + rule_code annotation, e.g., (P003)
+│
+└── Plain rule_text entries (cannot confirm rule_code)
+      ├──✗ Does NOT enter rules_applied[] (rules_effectiveness not updated, _rules_applied also not recorded)
+      ├──→ header comment Applied Rules: plain "rule_text" format
+      └──→ approach_description: technique name description (no rule_code annotation)
+```
+
+> **Four roles**:
+> - **APPLIED_RULES**: Workflow variable, maintained during Bind Rules phase, holds both types of entries
+> - **rules_applied**: API field (`complete_iteration` JSON), **only contains entries with rule_code**, drives statistics update
+> - **_rules_applied**: Structured snapshot automatically written by API in `reference_metadata`, supplements `rule_text`, `api_success` and other API-side-only information; **Cursor users do not need to read or operate on this field**
+> - **header comment Applied Rules**: Readable section in code_snapshot, **both types of entries must be recorded** (format in Section 6)
+
+> ❗ The determination rules for `rules_applied.success` and the update logic for `times_applied` / `success_count` / `avg_ii_improvement` are in Section 4 "Distinction Between Two Types of Success".
+> ❗ **On rule_code match failure**: `rules_effectiveness` is not updated, but the iteration is still recorded normally.
+
+---
+
+### previous_ii Baseline Definition
+
+> `current_ii` = this iteration's **`ii_bneck`** from the csynth report (**same numeric value** as `synthesis_result.ii_achieved`).
+>
+> `previous_ii` = the **`ii_bneck`** baseline **before** this iteration's optimization took effect. It is a **required integer** in `rules_applied` (API does not accept null). The value drives `api_success`, `ii_improvement`, and `avg_ii_improvement` statistics.
+
+**Two-layer priority** (select the first layer that applies):
+
+**Layer 1: Has prior iteration record (source = `"measured"`)**
+- `previous_ii` = the last completed iteration's **`current_ii`** from **`rules_applied`**, i.e. the previous run's **`ii_bneck`** (same numeric value as `synthesis_result.ii_achieved` recorded for that iteration)
+- This is the default for all non-first iterations
+- Main flow step 12 naturally produces this value: "carry this iteration's current_ii forward as the next round's previous_ii per Layer 1"
+
+**Layer 2: First iteration, no prior record (source = `"estimated"` or `"fallback"`)**
+
+Cursor **must** estimate a theoretical baseline II representing the unoptimized design's expected bottleneck. Estimation sub-layers (by priority):
+
+```
+2a. USER_SPEC explicitly provides a baseline
+    → Use directly
+    → Example: "original II was about 50" → previous_ii = 50
+    → source = "estimated"
+
+2b. Structural estimation from design analysis (Cursor semantic reasoning):
+    ┌─ Single main loop + array access, no partition
+    │   → previous_ii = max(accessed array dimensions)
+    │   → Example: FIR shift_reg[128] → 128
+    │
+    ├─ Nested loops, no partition/unroll
+    │   → previous_ii = innermost_loop_bound
+    │   → Example: matmul K=16 → 16
+    │
+    ├─ Multiple independent bottlenecks
+    │   → previous_ii = max(estimated values across bottlenecks)
+    │
+    └─ Track 1 has same-type historical records
+        → previous_ii = highest (worst) ii_bneck from Track 1 results (semantically aligned with API's ii_achieved)
+        → Example: Track 1 worst ii_bneck = 264 → 264
+    → source = "estimated"
+
+2c. Fallback (none of the above applicable, e.g., complex control flow)
+    → previous_ii = max(ii_target × 2, 2)
+    → source = "fallback"
+    → Rationale: ensures success=true when current_ii <= ii_target,
+      and ii_improvement stays positive but conservatively small
+```
+
+> ❗ **Estimation precision**: Only order-of-magnitude correctness is needed (e.g., 128 vs 100 does not affect `success` determination). Do not pursue exact values.
+
+**Recording requirement for `reference_metadata`**:
+
+**1. `cursor_reasoning`** — first iteration Layer 2 only (human-readable, embedded in reasoning text):
+
+```
+"previous_ii=128 (estimated baseline: shift_reg[128] single-port bottleneck, Layer 2b)"
+```
+
+Three required elements: **estimated value**, **derivation basis**, **layer used** (2a/2b/2c).
+
+**2. `reference_metadata`** — structured fields (authoritative field list):
+
+```json
+{
+  "language": "cpp",
+  "ii_top": 517,
+  "ii_top_previous": null,
+  "previous_ii_source": "estimated",
+  "previous_ii_basis": "shift_reg[128] single-port bottleneck, Layer 2b"
+}
+```
+
+| Field | Type | When | Description |
+|-------|------|------|-------------|
+| `ii_top` | int | Every iteration | Top-level function Interval from this csynth report |
+| `ii_top_previous` | int \| `null` | Every iteration | Previous iteration's `ii_top`; `null` on first iteration |
+| `previous_ii_source` | `"measured"` / `"estimated"` / `"fallback"` | First iteration (Layer 2) only | Which layer was used for `previous_ii` |
+| `previous_ii_basis` | Free text | First iteration (Layer 2) only | Derivation basis + layer identifier |
+
+> `ii_top` / `ii_top_previous`: **every iteration** (structured Layer B backup; `latency_cycles` cannot replace `ii_top` in DATAFLOW / systolic / FFT designs where `ii_top ≠ latency + 1`).
+> `previous_ii_source` / `previous_ii_basis`: **only** first iteration Layer 2. Non-first iterations **omit** these (Layer 1 = measured, self-evident).
+> When `USER_REF_CODE` and `USER_SPEC` are both absent, still provide at least `{"ii_top":..., "ii_top_previous":...}` (not null); Layer 2 additionally requires `previous_ii_source` + `previous_ii_basis`.
+
+**success determination** (`rules_applied` — **Layer A / `ii_bneck` only**):
+
+```
+success = (current_ii < previous_ii)   // both values = ii_bneck
+```
+
+This formula applies identically regardless of whether `previous_ii` is measured (Layer 1) or estimated (Layer 2). **Do not** set `success` from **`ii_top`** or **latency** alone — see 「II Metric Priority (`ii_bneck` vs `ii_top`)」 above.
+
+The API independently recalculates `api_success = rule_app.success AND (previous_ii > current_ii)`, so Cursor's `success` value and the API's recalculation will agree as long as **`previous_ii` / `current_ii` are both `ii_bneck`**.
+
+**Concrete examples**:
+
+```json
+// Example: FIR first iteration, Layer 2b (shift_reg[128])
+// Result: II=1, estimated baseline=128
+"reference_metadata": {
+  "language": "cpp",
+  "ii_top": 517, "ii_top_previous": null,
+  "previous_ii_source": "estimated",
+  "previous_ii_basis": "shift_reg[128] single-port memory bottleneck, Layer 2b"
+}
+"rules_applied": [{
+  "rule_code": "P003",
+  "rule_description": "Must completely overlap load, compute, and store.",
+  "previous_ii": 128,
+  "current_ii": 1,
+  "success": true,
+  "category": "memory"
+}]
+// cursor_reasoning includes: "previous_ii=128 (estimated baseline: shift_reg[128]
+//   single-port memory bottleneck, Layer 2b)"
+```
+
+**Other Layer 2 scenarios** (same JSON structure as above, only values differ):
+
+| Scenario | `previous_ii` | `source` | `basis` |
+|----------|--------------|----------|---------|
+| matmul, Layer 2b (innermost K=16) | 16 | `"estimated"` | `"innermost loop bound K=16, no partition, Layer 2b"` |
+| Complex design, Layer 2c fallback | `max(ii_target×2, 2)` | `"fallback"` | `"ii_target(1) × 2, complex control flow, Layer 2c"` |
+
+---
+
+## Post-Synthesis: Auto-Record to KB
+
+**Trigger timing**: After csim **and** csynth **both succeed**, executed automatically. Either failure → skip, do not record.
+
+> The following Steps 1–5 correspond to main flow steps 8–11: Step 1 = step 8 (Parse & Header), Step 2 = step 9 (Query project_id), Steps 3–4 = step 10 (Record to KB), Step 5 = step 11 (Document Local).
+
+### Step 1: Parse Synthesis Report
+
+Report directory: `{project}.proj/{solution}/syn/report/`
+
+> ❗ The structural anchors below are based on **Vitis HLS 2023.2**. Column names, column order, and section headings may vary across versions — always parse based on actual report content. The report directory path is generally consistent across versions.
+
+This directory contains two reports; extract from each as needed:
+
+**A. `csynth.rpt`** — locate the **Performance & Resource Estimates** section (heading contains this phrase).
+
+#### What to find (semantic goals)
+
+| Target | What to look for | Notes |
+|--------|-----------------|-------|
+| **II (loop bottleneck)** | Among all pipelined loop rows (`o ...`, `Pipelined` = yes), take the **Interval** column; **if multiple such loops exist, take the maximum**. Denote this value **`ii_bneck`**. It is what **`synthesis_result.ii_achieved`** stores (API field name unchanged). | See multi-loop rule below |
+| **ii_top** | On the **top-level function row** (`+` top function, **not** loop rows), read the **Interval** column. This is **initiation interval per top-level invocation** (often differs from `ii_bneck` when the wrapper is not pipelined or trip count dominates). | Always record in `cursor_reasoning` (see 「II Metric Priority」); **not** used for `rules_applied.success` |
+| **Latency** | The total latency (in cycles) of the top-level function | Not a loop row; the function-level summary row |
+| **Timing** | Whether timing constraints were met | met: no timing violation flag and slack ≥ 0; violated: timing issue flag present or slack is negative |
+| **Resources** | BRAM, DSP, FF, LUT, URAM utilization of the top-level function | Entries like `6547 (6%)` — take the integer part; `-` means 0 |
+
+#### Structure anchors (version reference, not rigid format)
+
+The table typically has two row types:
+- **Top-level function row** (prefixed with `+`, no indentation) — use for Latency, Timing, Resources
+- **Loop rows** (prefixed with `o`, indented under a function or sub-module) — use for II
+
+Sub-module rows (indented `+`, between the top-level `+` and loop `o` rows) are intermediate decompositions — do not treat them as the top-level function.
+
+```
+|+ top_function   |  -| 0.30|  516| ...  |  517|  -|  no| ... |   (top-level: Latency/Timing/Resources)
+| + sub_module    |  -| 4.42|   20| ...  |   20|  -|  no| ... |   (sub-module: skip)
+|  o LOOP_NAME    |  -|10.22|   18| ...  |    1| 18| yes| ... |   (pipelined loop: II)
+```
+
+The column carrying II is typically labeled `Interval`; the pipeline status column is typically labeled `Pipelined` with value `yes`/`no`. Column order may differ — locate by header name, not position.
+
+#### Multi-loop II resolution rule
+
+```
+Single pipelined loop  → ii_bneck = that loop's Interval
+Multiple pipelined loops → ii_bneck = max(all pipelined loop Intervals)
+  Rationale: overall throughput is bounded by the slowest pipeline stage
+DATAFLOW design (rows marked with * prefix in the report)
+  → ii_bneck = max(Interval of each DATAFLOW stage)
+Nested pipeline (pipeline within pipeline) — exception to the max rule above
+  → Do NOT include inner pipelined loops in max(all …); Vitis HLS ties reported throughput to the
+    outermost pipelined loop's Interval for that region; inner loop II shapes iteration latency inside
+    the outer pipeline, not the outer stage's initiation interval used for scheduling.
+```
+
+**Supplement — no pipelined loop row:**
+
+```
+All loop rows Pipelined=no, or no `o` loop rows in the report
+  → ii_bneck = ii_top (use top-level `+` function row Interval as fallback)
+  → In cursor_reasoning note: "ii_bneck fallback to ii_top: no pipelined loop row found"
+  → ii_bneck and ii_top are numerically equal; Layer A vs Layer B distinction does not apply
+```
+
+**Map to API**: `synthesis_result.ii_achieved` ← **`ii_bneck`** (same numeric rule as above).
+
+> ❗ Getting this rule wrong directly affects `ii_improvement` statistics.
+
+### II Metric Priority (`ii_bneck` vs `ii_top`) for `rules_applied` and documentation
+
+**Definitions (from `csynth.rpt` Performance & Resource Estimates):**
+
+| Symbol | Meaning |
+|--------|--------|
+| **`ii_bneck`** | **Max** of **Interval** over all **pipelined loop** rows (`o ...`, Pipelined = yes), per 「Multi-loop II resolution rule」 above. |
+| **`ii_top`** | **Interval** on the **top-level** `+` function row (not a loop row). |
+
+**Layer A — KB `rules_applied` / `success_count` (sole driver of “II improved” for rules):**
+
+- **`rules_applied[].previous_ii`**, **`current_ii`**, and **`success`** MUST use **`ii_bneck`** only (aligned with 「previous_ii Baseline Definition」: Layer 1 previous = last iteration's stored **`ii_bneck`**).
+- **`success` = (`current_ii` < `previous_ii`)** where both are **`ii_bneck`**.
+- **`success_count`** in the KB only increments when this **`ii_bneck`** comparison is true (see Section 4).
+
+**Layer B — Throughput / latency narrative (does NOT replace Layer A for `rules_applied.success`):**
+
+- When **`ii_bneck`** is already **saturated** (e.g. **1**) or **unchanged** across iterations — common for **simple designs** (single MAC loop FIR, small matmul) after the first good pipeline — **real progress** may appear only as **`ii_top`** ↓ or **`latency_cycles`** ↓ (trip halving, symmetry fold, DATAFLOW, etc.).
+- **Always** record in **`cursor_reasoning`** (and local docs): **`ii_bneck`**: prev→curr; **`ii_top`**: prev→curr; **`latency_cycles`** if relevant; and one explicit line such as **`rules_applied success basis: ii_bneck only (Layer A)`**.
+- If **`ii_top`** or latency improved but **`ii_bneck`** did not decrease: state **`Layer B improvement (ii_top / latency)`** in prose — **do not** set **`rules_applied.success = true`** **solely** from **`ii_top`/latency**, or pipeline-oriented rules (e.g. R035) would get **misleading `success_count`**.
+
+**Why:** Track 2 **success_rate** is meant to reflect **loop II / pipeline rule** outcomes. Mixing **top-level Interval** into the same **`success` bit** blurs **pipeline pragmas** with **structural / algorithmic** wins.
+
+**Project-type note:** **FIR / simple loop** designs often hit **`ii_bneck`=1** early; **CORDIC / systolic / FFT** may iterate many rounds with **`ii_bneck` > 1** — Layer A stays meaningful longer.
+
+**B. `{top_function}_csynth.rpt`** — locate the **Timing Summary** section (heading contains `Timing` and `Summary`).
+
+#### What to find
+
+| Target | What to look for | Notes |
+|--------|-----------------|-------|
+| **clock_period_ns** | The clock **target** (constraint), in ns | Strip the `ns` unit suffix; this is the actual clock constraint used in synthesis — not the estimated value |
+
+> This file also contains a Loop Latency detail section with II `achieved`/`target` columns — useful as cross-validation, but report A is the primary source.
+
+> ❗ `similar` / `progress` API return `resource_usage` as a JSON string (not an object); parse with `json.loads()` or `jq '. | fromjson'` before use.
+
+---
+
+### Step 2: Query project_id (CRITICAL — MUST DO FIRST)
+
+```bash
+# Use /api/projects for exact lookup (the only correct method)
+PROJECTS_RESULT=$(curl -s "{{GEN_KB_API}}/api/projects?type=${PROJECT_TYPE}")
+
+# Exact match by project_name
+EXISTING_PROJECT_ID=$(echo "$PROJECTS_RESULT" | \
+  jq -r --arg name "$PROJECT_NAME" '.results[] | select(.name == $name) | .id // empty' | head -1)
+
+if [ -n "$EXISTING_PROJECT_ID" ] && [ "$EXISTING_PROJECT_ID" != "null" ]; then
+  PROJECT_ID="$EXISTING_PROJECT_ID"
+else
+  PROJECT_ID=$(python3 -c "import uuid; print(uuid.uuid4())")  # New project
+fi
+```
+
+**Existing project verification (Step 2a)**: After finding project_id, use `GET /api/projects/${PROJECT_ID}` to confirm name/type match. If mismatch, stop the workflow and notify the user; do not proceed to call complete_iteration.
+
+**NEVER DO**: Skip Step 2, hard-code UUID, take project_id from `/api/design/similar`.
+
+**iteration_number anomaly diagnosis**: If the response returns `iteration_number=1` (expected non-1), an incorrect project_id was used (API created a new project). Stop, check `GET /api/projects/${PROJECT_ID}` to confirm, notify user; erroneous records require administrator rollback.
+
+> ❗ **iteration_number is automatically computed by the API** (MAX+1); Cursor does not need local calculation.
+
+---
+
+### Step 3: Fill User Input Fields
+
+Directly reference the final values from front-capture (no need to scan conversation history again):
+- `user_reference_code` ← USER_REF_CODE
+- `user_specification` ← USER_SPEC
+- `reference_metadata` ← Language from USER_REF_CODE + `ii_top` / `ii_top_previous` (every iteration) + `previous_ii_source` / `previous_ii_basis` (first iteration Layer 2). Full field list → 「previous_ii Baseline Definition」. `_rollback_info` / `_rules_applied` auto-written by API.
+
+---
+
+### Step 4: Call complete_iteration API
+
+**Precondition**: code_snapshot has passed the Comment Quality Checklist (see Section 6).
+
+> **Placeholder filling rules**:
+> - String fields (`"DETECTED_APPROACH"`, etc.) → keep outer quotes when filling, replace content
+> - Numeric fields (`PARSED_II`, `PARSED_LATENCY`, etc.) → fill integer, no quotes — **`PARSED_II` = `ii_bneck`** (see Step 1 「II Metric Priority」)
+> - `II_TARGET_FROM_USER_SPEC` → II target value extracted from USER_SPEC (integer); default `1` if unspecified
+> - `PARSED_CLOCK_PERIOD_NS` → Parsed from csynth report `+ Timing: * Summary:` `Target` column (float, e.g., `10.0`), no quotes
+> - Boolean fields (`PARSED_TIMING_STATUS`, `DETERMINED_SUCCESS`) → fill `true` or `false`, no quotes
+> - Object fields (`PARSED_RESOURCES`) → fill `{"DSP":2,"LUT":348,"FF":447,"BRAM_18K":2}` format
+> - Array fields (`["DETECTED_PRAGMAS"]`) → each element quoted
+> - `null` values → fill `null` directly, no quotes (remove outer string quotes)
+
+```bash
+curl -X POST "{{GEN_KB_API}}/api/design/complete_iteration" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "project_id": "'$PROJECT_ID'",
+    "project_name": "PROJECT_NAME",
+    "project_type": "DETECTED_TYPE",
+    "target_device": "{{TARGET_PART}}",
+    "iteration": {
+      "project_id": "'$PROJECT_ID'",
+      "approach_description": "DETECTED_APPROACH",
+      "code_snapshot": "GENERATED_HLS_CODE",
+      "pragmas_used": ["DETECTED_PRAGMAS"],
+      "prompt_used": "USER_ORIGINAL_REQUEST",
+      "cursor_reasoning": "OPTIMIZATION_REASONING",
+      "user_reference_code": "USER_REF_CODE_OR_NULL",
+      "user_specification": "USER_SPEC_OR_NULL",
+      "reference_metadata": "AUTO_METADATA_OR_NULL"  // every iteration: ii_top + ii_top_previous; Layer 2: also previous_ii_source + previous_ii_basis
+    },
+    "synthesis_result": {
+      "ii_achieved": PARSED_II,  // = ii_bneck from csynth.rpt
+      "ii_target": II_TARGET_FROM_USER_SPEC,
+      "latency_cycles": PARSED_LATENCY,
+      "timing_met": PARSED_TIMING_STATUS,
+      "resource_usage": PARSED_RESOURCES,
+      "clock_period_ns": PARSED_CLOCK_PERIOD_NS
+    },
+    "rules_applied": [
+      {
+        "rule_code": "DETECTED_RULE_CODE",
+        "rule_description": "DETECTED_RULE_DESCRIPTION",  // Auxiliary note for Cursor side, not used by API
+        "previous_ii": PREVIOUS_II,  // Layer 1: last iteration's ii_bneck; Layer 2: estimated ii_bneck baseline → see 「previous_ii Baseline Definition」
+        "current_ii": CURRENT_II,
+        "success": DETERMINED_SUCCESS,  // = (current_ii < previous_ii); uniform formula for both measured and estimated baselines; API independently recalculates: if II did not decrease, success_count is not incremented, avg_ii_improvement is not included
+        "category": "RULE_CATEGORY"
+      }
+    ]
+  }'
+```
+
+**Response**: `{"status":"success", "iteration_id":"uuid", "iteration_number":N, "project_id":"uuid", "rules_recorded":N, "message":"..."}`
+
+> **API internal flow after receiving request**:
+> 1. Ensure project exists (auto-create if not, record project_created)
+> 2. Compute iteration_number = MAX(existing sequence numbers for the same project_id) + 1
+> 3. Insert design_iterations (API automatically computes code_hash = SHA256(code_snapshot))
+> 4. Insert synthesis_results (generates result_id)
+> 5. Process rules_applied entries one by one → update rules_effectiveness, simultaneously collecting prev_state snapshots needed for rollback
+> 6. Merge _rollback_info and _rules_applied into reference_metadata (merge, does not overwrite user-defined fields)
+
+---
+
+### Step 4a: API Error Handling
+
+**409 Conflict** (project name duplicate): the response contains `existing_project_id`; use this ID directly as `PROJECT_ID` and retry `complete_iteration` to record the new iteration under the existing project. Do not attempt to create a new project.
+
+**500 / Connection timeout**: Wait 3 seconds and retry once (re-run Step 2 before retry); if still fails → stop, ensure local documentation is complete.
+
+> ❗ **Regardless of API success, Step 5 local documentation must be completed.**
+
+---
+
+### Step 5: Document Locally
+
+Create/update local markdown backup (the backup when API is unavailable):
+
+- `optimization_summary.md`: Detailed iteration history (approach, pragmas, results, with file navigation index)
+- `performance_comparison.txt`: II progress, resource comparison
+- `rule_effectiveness_tracking.md`: Before/after for each rule, success, II improvement, resource cost
+- `README.md`: Project overview, final results
+
+### Iteration Checklist (Final verification before recording)
+
+**Pre-Design:**
+- [ ] Query KB: similar designs + effective rules
+- [ ] Select rules (semantic relevance first; success_count > 0: sort by success_rate → times_applied; success_count = 0: priority ≥7 recommended)
+- [ ] Bind Rules: maintain `APPLIED_RULES` (rule_code+rule_text or plain rule_text)
+- [ ] Determine `previous_ii` baseline (→ see 「previous_ii Baseline Definition」 above; Layer 1: last current_ii; Layer 2: estimated/fallback; annotate source in cursor_reasoning for first iteration)
+
+**Implementation:**
+- [ ] Apply pragmas + pragma comments (three-line explanation)
+- [ ] Run csim + csynth
+
+**Post-Synthesis:**
+- [ ] Parse report: **`ii_bneck`**, **`ii_top`**, latency, resources, timing (→ Step 1 + 「II Metric Priority」)
+- [ ] Fill header comment: fill measured data all at once at .cpp top (→ see Section 6 Write Timing)
+- [ ] Determine **`rules_applied` success**: `success = (current_ii < previous_ii)` with **both = `ii_bneck`** → Section 4 + 「II Metric Priority」+ 「previous_ii Baseline Definition」. **Layer B** (`ii_top`/latency) only in `cursor_reasoning` / local docs.
+- [ ] **`cursor_reasoning`** includes **`ii_bneck` / `ii_top` prev→curr** (four numbers) and **`rules_applied success basis: ii_bneck only (Layer A)`** (or note Layer B improvement separately)
+- [ ] code_hash: automatically computed by API (can locally use `echo -n "$CODE_SNAPSHOT" | sha256sum` to pre-compare for deduplication → see Section 6 code_hash Deduplication)
+
+**Recording:**
+- [ ] Step 2: Query project_id (`/api/projects` + project_name exact match)
+- [ ] Step 4: Call complete_iteration (code_snapshot has passed Comment Quality Checklist → see Section 6)
+- [ ] Step 5: Update local docs (regardless of API success)
+- [ ] Verify: iteration_number incremented correctly
+
+---
+
+## Reference
+
+### Field Index and Filling Specifications
+
+> This section is a **reference** for before recording. Confirm each field is ready before calling `complete_iteration`.
+
+#### Field Source Reference
+
+| Field | Required | Value Source |
+|-------|----------|-------------|
+| `project_id` | ✓ | Step 2: `GET /api/projects?type=` + `project_name` exact match |
+| `target_device` | ✓ | use `{{TARGET_PART}}`; omit or set `null` to use API default |
+| `approach_description` | ✓ | Cursor assembled: technique names + rule_code annotations |
+| `code_snapshot` | ✓ | Assembled in separator format after csim+csynth succeed (with header comment measured values) → see Section 6 |
+| `pragmas_used` | ✓ | Extract all `#pragma HLS` line by line from code_snapshot |
+| `prompt_used` | ✓ | Main driving sentence for this iteration (single-point snapshot, not accumulated) |
+| `cursor_reasoning` | ✓ | Two-track query + bottleneck + **mandatory** `ii_bneck` / `ii_top` prev→curr lines + **rules_applied success basis** (see 「II Metric Priority」) |
+| `user_reference_code` | No | ← USER_REF_CODE final value |
+| `user_specification` | No | ← USER_SPEC final value (accumulated across rounds) |
+| `reference_metadata` | No | Language + `ii_top`/`ii_top_previous` (every iter) + `previous_ii_source`/`previous_ii_basis` (Layer 2 only). Full field list → 「previous_ii Baseline Definition」 |
+| `code_hash` | — | **Automatically computed by API** (SHA256 of code_snapshot); Cursor does not fill this |
+
+> **`rules_applied` sub-fields**: `rule_code` from APPLIED_RULES; `previous_ii` = Layer 1: last iteration's **`ii_bneck`** (measured), Layer 2: estimated **bottleneck** baseline for **`ii_bneck`** (→ see 「previous_ii Baseline Definition」); `current_ii` = this round's **`ii_bneck`** (same as `synthesis_result.ii_achieved`); `success` = `(current_ii < previous_ii)` — **both must be `ii_bneck`**; `category` from Track 2 query results (optional). **`ii_top` / latency** are **not** substituted into `current_ii`/`previous_ii` for `success`.
+> ❗ `complete_iteration` uses the outer `project_id` for project lookup/creation. `iteration.project_id` is written directly to DB **without consistency check**; both must be the same value.
+> ❗ `rules_applied` can be an empty array `[]`; iteration and synthesis_result are still recorded normally, only rules_effectiveness is not updated.
+> `reference_metadata`: always include `ii_top` + `ii_top_previous`; if no USER_REF_CODE/USER_SPEC, still provide at least `{"ii_top":..., "ii_top_previous":...}`; Layer 2 first iteration additionally requires `previous_ii_source` + `previous_ii_basis`. `_rollback_info` / `_rules_applied` are auto-written by API.
+
+---
+
+#### Filling Specification: approach_description
+
+One sentence summarizing the technique combination used in this iteration (≤ 100 words). Techniques connected with ` + `, annotated with rule_code when available, described without rule_code otherwise.
+
+- **Include**: All `#pragma HLS` technique names + key parameters
+- **Exclude**: Reasoning (→ `cursor_reasoning`), synthesis result numbers (→ header comment)
+
+```
+✓ "Streaming AXIS + ap_ctrl_none + STREAM depth=8 + ARRAY_PARTITION complete + full UNROLL + PIPELINE II=1"
+✓ "Array partition cyclic factor=2 (P003) + Loop unroll factor=2"
+✓ "Custom loop tiling + ARRAY_PARTITION complete dim=2"
+✗ "Applied optimization to reduce II"            ← No technique names
+✗ "P003 + P004"                                  ← Only rule codes
+```
+
+#### Filling Specification: cursor_reasoning
+
+Records the reasoning behind "why this combination was chosen". **Must cover** the sources below (extra row for first iteration):
+
+| Source | What to Record |
+|--------|---------------|
+| Track 1 findings | What is the best II for the same type, which pragma combination achieved it |
+| Track 2 selected rules | Which rule_codes were selected, reasoning (rule_text semantic match / success_rate / times_applied / priority) |
+| Bottleneck analysis | Root cause from previous report (e.g., II=128 = array_size → single-port bottleneck) |
+| **II metrics (every iteration)** | **`ii_bneck`**: previous → current (or `n/a` → current on first recording after baseline); **`ii_top`**: previous → current (same); **`latency_cycles`** if relevant. One line: **`rules_applied success basis: ii_bneck only (Layer A)`**. If **`ii_top`/latency improved** but **`ii_bneck` did not decrease**, describe as **Layer B** (narrative / local docs) — **do not** use that to set `rules_applied.success`. |
+| **previous_ii baseline** (first iteration only) | Estimated **ii_bneck** value, derivation basis, and layer used (→ see 「previous_ii Baseline Definition」) |
+
+**Boundary**: `approach_description` = what was done; `cursor_reasoning` = why it was done.
+
+```
+✓ Non-first iteration:
+  "Track 1: best FIR II=1 via complete partition + full unroll (iter#5).
+   Bottleneck: previous II=128 = array_size → single-port memory limit.
+   Track 2: selected P003 (rule_text matches single-port bottleneck, success_rate=0.83, times_applied=12, category=memory).
+   Chose complete over cyclic: array_size=128 fits BRAM budget.
+   Metrics: ii_bneck=128→1; ii_top=517→517; latency_cycles=66048→516.
+   rules_applied success basis: ii_bneck only (Layer A)."
+
+✓ First iteration (must include previous_ii annotation):
+  "Track 1: best FIR II=1 via complete partition + full unroll (iter#5).
+   previous_ii=128 (estimated baseline: shift_reg[128] single-port memory bottleneck, Layer 2b).
+   Track 2: selected P003 (rule_text matches single-port bottleneck, success_rate=0.83, times_applied=12, category=memory).
+   Chose complete over cyclic: array_size=128 fits BRAM budget.
+   Metrics: ii_bneck=n/a→1; ii_top=n/a→517; latency_cycles=n/a→516.
+   rules_applied success basis: ii_bneck only (Layer A)."
+```
+
+When no results: Track 1 empty → record `"No similar designs; applying Track 2 Path B."`; Track 2 empty → `"No rule_code matched."`
+
+#### Filling Specification: prompt_used
+
+The "main driving sentence" that triggered this iteration (single-point snapshot, **not accumulated**, unlike USER_SPEC).
+
+| Case | How to Get Value |
+|------|-----------------|
+| User explicitly specified | Take original text |
+| User says "continue" or "ok" | Take the most recent message with substantive instructions from the previous round |
+| Cursor proactively proposed | `"[Cursor proposed] " + summary` |
+| Cursor self-driven | `"[Cursor autonomous] " + objective` |
+
+Length < 500 characters; truncate if too long and append `...(truncated)`. Fill `null` if not provided.
+
+---
+
+### API-Internal Structures (Administrator Reference)
+
+> **Cursor does not read, write, or operate on these fields.** They are documented here solely for completeness.
+
+`_rollback_info` and `_rules_applied` are **automatically** written into `reference_metadata` by `complete_iteration` on every successful call. They enable precise rollback and provide a structured audit trail.
+
+> ❗ **Merge semantics**: If Cursor passes custom `reference_metadata` (e.g., `{"language":"cpp", "ii_top":517}`), the API **preserves** existing content and appends `_rollback_info` / `_rules_applied` — user-defined fields are never overwritten.
+> ❗ `_rules_applied` and `rules_effectiveness` update scope are exactly the same: only rules whose `rule_code` matches `hls_rules` are included; unmatched rules are skipped in both.
+
+**Key fields** (read by administrators during rollback, not by Cursor):
+
+| Structure | Contains | Purpose |
+|-----------|---------|---------|
+| `_rollback_info` | `project_created`, `synthesis_result_id`, `rules_changes[]` (with `prev_state` snapshots) | Precisely restore `rules_effectiveness`, delete `synthesis_results` / `design_iterations` / empty projects |
+| `_rules_applied` | Per-rule: `rule_code`, `rule_text`, `category`, `previous_ii`, `current_ii`, `cursor_success`, `api_success`, `ii_improvement` | Structured snapshot; `api_success` = API recalculation of whether `ii_bneck` actually decreased |
+
+> `header comment Applied Rules` is the **only** record that simultaneously contains both rule_code entries and plain rule_text entries (for rules without confirmed rule_code). `_rules_applied` only contains matched rule_code entries.
+
+
+---
+
+
+## Reproduce Specific Iteration
+
+> Reproduction is for verification or learning only; **does not trigger the automatic recording process** (same code_hash = duplicate data).
+> If you modify and re-synthesize based on a reproduction, the modified version is a new iteration and should be recorded normally.
+
+### Workflow
+
+**1. Retrieve iteration_id**:
+- Known project_id → `GET /api/analytics/project/${PROJECT_ID}/progress` → find target iteration_number
+- Known project_type → `GET /api/design/similar?project_type=fir&limit=10` → select target (also note project_id)
+
+**2. Retrieve code_snapshot**:
+```bash
+curl "{{GEN_KB_API}}/api/design/${ITER_ID}/code"
+# Returns: iteration_number, project_name, code_snapshot, code_hash, pragmas_used,
+#          approach_description, cursor_reasoning, prompt_used,
+#          user_reference_code, user_specification
+```
+
+**3. Restore files**: Split code_snapshot into separate files by the separator lines (Section 6 "Restoration rules": split by `// === {filename} ===` separator lines). File order in code_snapshot is [.h] → .cpp → testbench → [.inc].
+- `.inc` files restored from code_snapshot are placed in the same directory as `.cpp` (they are referenced via `#include "*.inc"` and do not need `add_files` in run_hls.tcl)
+
+**4. Extract information from header comment**: Semantically extract Previous / Synthesis Result / Resources / Applied Rules, etc. (header comment format in Section 6).
+- Applied Rules **have no KB fallback** (the only source is the header comment)
+- Synthesis Result / Resources: prefer header comment; if missing, retrieve from `GET /api/analytics/project/{id}/progress`
+
+**5. Generate run_hls.tcl**:
+
+| Parameter | Source |
+|-----------|--------|
+| top function | Function signature in code_snapshot |
+| `.h` file (if any) | `*.h` filename from separator lines |
+| Source file name | `*.cpp` filename from separator lines (excluding `*_tb.cpp`) |
+| testbench | `*_tb.cpp` filename from separator lines |
+| `.inc` file (if any) | Not added via `add_files`; must be placed in the same directory as `.cpp` |
+| target_device | Use the default value (`{{TARGET_PART}}`)|
+| clock_period | Use the default value (`{{DEFAULT_CLOCK_PERIOD_NS}}`)|
+
+```tcl
+open_project reproduce_proj
+set_top fir
+# add .h first (if exists), then .cpp
+# add_files fir.h        ← uncomment if .h exists
+add_files fir.cpp
+add_files -tb fir_tb.cpp
+# .inc files are NOT added via add_files — they are #included by .cpp
+# and only need to be in the same directory
+open_solution "solution1"
+set_part {xc7z020clg400-1}
+create_clock -period 10 -name default
+csim_design
+csynth_design
+exit
+```
+
+**6. Execute and verify**: `{{VITIS_HLS_CMD}} -f run_hls.tcl`; compare II / Latency / Resources / Timing against the original record (header comment or KB `synthesis_results`). Discrepancies may be due to different Vitis HLS versions or FPGA targets.
+
+---
+
+## API Response Supplement
+
+**`complete_iteration` `project_name` field**: Optional, but when project_id does not exist and the API auto-creates a project, omitting this field results in a default name of `{PROJECT_TYPE uppercase}_Design` (e.g., `FIR_Design`). Always provide an explicit name to avoid hard-to-identify projects.

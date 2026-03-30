@@ -1,0 +1,471 @@
+---
+description: HLS code snapshot standards: file header, pragma comments, code_snapshot format, Comment Quality Checklist (Section 6)
+alwaysApply: true
+---
+# Copyright (c) 2026 AICOFORGE. All rights reserved.
+# CC BY-NC 4.0 — non-commercial use only. See LICENSE.
+# Commercial use: kevinjan@aicoforge.com
+
+################################################################################
+# Section 6. Code Snapshot & Comment Standards
+################################################################################
+
+## code_snapshot Specification
+
+### Definition and Content Scope
+
+`code_snapshot` is a required field in the `design_iterations` table, storing the **complete HLS code needed to reproduce** that iteration.
+
+#### Content Scope
+
+code_snapshot uses a unified separator format. File order is fixed: **[.h] → .cpp → testbench → [.inc]**, where `.h` and `.inc` are optional (include them if they exist in the project directory; omit if not).
+
+> No need to judge whether the `.h` or `.inc` content is important. If they exist, include them; if not, don't. The testbench must be the one that passed csim.
+
+**Included**:
+- ✓ File header comment (iteration, Previous, Target, Applied Rules, etc.) — placed at the top of .cpp only
+- ✓ All `#pragma HLS` (pragma comments also included)
+- ✓ `#include`, `#define`, `typedef`, and other preprocessor definitions
+- ✓ Top function and all its static helper functions
+- ✓ `.h` files (if they exist in the project directory; placed before .cpp)
+- ✓ Testbench (`*_tb.cpp`) — must be the one that passed csim, placed after .cpp
+- ✓ `.inc` files (if they exist in the project directory, e.g., twiddle tables / coefficients; placed as the last section)
+
+**Excluded**:
+- ✗ Post-synthesis modified versions (must be the code submitted to csynth, no post-modification)
+
+> These four file types (`.h`, `.cpp`, `*_tb.cpp`, `.inc`) are the only types Cursor is allowed to produce during Implementation (see Section 4), so the code_snapshot format above is complete — no catch-all category is needed.
+
+**Corresponding field descriptions**:
+
+| Field | Content | Computation |
+|-------|---------|-------------|
+| `code_snapshot` | Complete code needed for reproduction (**required**) | Filled by Cursor |
+| `code_hash` | SHA256 of full code_snapshot text | Automatically computed by API |
+| `pragmas_used` | List of `#pragma HLS` extracted from code | Filled by Cursor |
+
+#### Separator Format
+
+code_snapshot uses **separator lines** to delimit each file. Separator line format is fixed:
+
+```
+// === {filename} ===
+```
+
+Where `{filename}` is the actual filename (e.g., `fir.h`, `fir.cpp`, `fir_tb.cpp`, `twiddle.inc`). Separator lines themselves do not belong to any file content.
+
+**File order**: `[.h] → .cpp → *_tb.cpp → [.inc]` (`.h` and `.inc` are optional; include if they exist in the project directory).
+
+**Structure** (`{filename}` is the actual filename):
+
+```
+// === fir.h ===                          ← optional, include if .h exists
+#ifndef FIR_H
+#define FIR_H
+#include "ap_int.h"
+typedef ap_int<16> data_t;
+void fir(data_t *input, data_t *output, int len);
+#endif
+
+// === fir.cpp ===
+// ============================================================================
+// FIR128_Optimization_Demo - Iteration #6
+// ...(file header comment, placed at the top of .cpp only)
+// ============================================================================
+#include "fir.h"
+void fir(data_t *input, data_t *output, int len) {
+    // ... complete implementation (with pragma comments)...
+}
+
+// === fir_tb.cpp ===
+#include "fir.h"
+#include <iostream>
+int main() {
+    // ... testbench complete content ...
+    return 0;
+}
+
+// === twiddle.inc ===                    ← optional, include if .inc exists
+// Twiddle factor table / coefficients
+static const data_t twiddle[N] = {
+    // ... coefficient data ...
+};
+```
+
+> Separator line format is fixed: `// === {filename} ===`. Separator lines themselves do not belong to any file content. For complete comment quality examples, see the "Conforming example" below.
+
+**Restoration rules** (used during reproduction):
+
+```
+1. Find all lines starting with "// === " and ending with " ===" — these are separator lines
+2. Extract `{filename}` from each separator line
+3. Content between a separator line and the next separator line (or end of file) is that file's complete content
+4. Separator lines themselves are not written to the restored files
+5. .inc files do not need add_files in run_hls.tcl but must be placed in the same directory as .cpp
+```
+
+---
+
+### Format Specification
+
+#### 1. File Header (Required)
+
+Each code_snapshot's `.cpp` section **must** begin with a standard file header comment, placed at the very top of `.cpp` (before all `#include`). The header comment is only added to `.cpp`; `.h`, testbench, and `.inc` sections do not include it:
+
+```cpp
+// ============================================================================
+// [Project_Name] - Iteration #N: [Optimization_Technique_Name]
+// ============================================================================
+// Previous: Iteration #X (II=Y cycles, [previous_approach])
+// Target: [Performance_goal, e.g., II < 10 cycles]
+//
+// Problem Identified:
+// - [What bottleneck or issue are we addressing?]
+// - [Evidence, e.g., "II=128 = array_size → memory port bottleneck"]
+//
+// Synthesis Result: II=[actual] cycles, latency=[actual] cycles, timing [met/violated]
+// Resources: DSP=[n], LUT=[n], FF=[n], BRAM=[n]
+//
+// Optimizations Applied:
+// 1. [Technique_Name] ([rule_code if known]):
+//    - What: [Specific technique and parameters]
+//    - Why:  [Problem it solves, rationale]
+//    - Parameters: [Specific values and WHY chosen these values]
+//    - Result: [Measured improvement from csynth report]
+//
+// 2. [Technique_Name]:
+//    ...
+//
+// Applied Rules:
+//    - P00X: [rule_text]          ← When rule_code (P### or R###) is known, must write rule_code + rule_text
+//    - R00X: [rule_text]
+//    - [rule_text only]           ← When rule_code cannot be confirmed, record rule_text only (must still record)
+// ============================================================================
+```
+
+> ❗ **Header comment is filled in all at once after csim + csynth both succeed** (see "Write Timing" below). When writing code, the .cpp file does not contain any header comment; after synthesis succeeds, the complete header is inserted at the very top of .cpp (before all `#include`). All values (Synthesis Result, Resources, each Optimization's Result) come from the csynth report's **measured data**, not expected values.
+
+**Required fields**:
+- ✓ Iteration number and optimization name
+- ✓ Previous iteration (iteration_number, II value, previous approach description)
+- ✓ Target (target II or performance metric)
+- ✓ **Synthesis Result** (measured II, latency, timing — from csynth report)
+- ✓ **Resources** (measured DSP, LUT, FF, BRAM — from csynth report)
+- ✓ Each Optimization's What / Why / Parameters (including parameter choice reasoning) / **Result** (measured value)
+- ✓ **Applied Rules** (see Applied Rules Recording Rule below; must record regardless of whether rule_code is available)
+
+**Recommended fields**:
+- Problem Identified (bottleneck cause and evidence, e.g., `II=128 = array_size`)
+
+---
+
+#### 2. Applied Rules Recording Rule (Required)
+
+**`Applied Rules` is the most important knowledge link in the `code_snapshot` header comment**. `reference_metadata._rules_applied` stores a structured snapshot of rules applied in this iteration (automatically written by the API); the `Applied Rules` of `code_snapshot` is the only place that simultaneously preserves both `rule_code` and plain `rule_text` entries, readable directly by humans.
+
+**Recording principle**:
+
+```
+All rules that Cursor referenced or applied when reasoning about optimization direction, regardless of whether rule_code can be confirmed, must be recorded in Applied Rules.
+```
+
+**Both cases must be recorded**:
+
+| Case | Format | Example |
+|------|--------|---------|
+| Has rule_code (P### or R###) | `- P00X: [rule_text]` | `- P003: Must completely overlap load, compute, and store.` |
+| Cannot confirm rule_code (only rule_text) | `- [rule_text]` | `- Never introduce cross-iteration dependencies.` |
+
+**How to get rule_text**: Track 2 two-track query response already includes `rule_text`; record it for later use before design:
+```bash
+curl "{{GEN_KB_API}}/api/rules/effective?rule_type=user_defined&min_success_rate=0" \
+  | jq '.rules[] | {rule_code, rule_text}'
+# If only rule_code is known, look up afterward:
+curl "{{GEN_KB_API}}/api/rules/effective?min_success_rate=0" \
+  | jq '.rules[] | select(.rule_code == "P003") | .rule_text'
+```
+
+**Applied Rules format example**:
+```cpp
+// Applied Rules:
+//    - P003: Must completely overlap load, compute, and store.
+//    - R035: Always apply PIPELINE to innermost loop.
+//    - R001: Use DATAFLOW to enable task-level parallelism.
+//    - Never introduce cross-iteration dependencies.   ← Referenced but cannot confirm rule_code
+```
+
+> ❗ **Prohibited practices**:
+> - `// Applied Rules: P002, P003` (only codes, no rule_text) — cannot be understood without querying API
+> - Omitting the Applied Rules section — even if all rules have no rule_code, must record as plain rule_text
+> - Only annotating rule codes in parentheses within Optimizations Applied (e.g., `(P003)`) without a separate Applied Rules section — both must be present
+
+---
+
+#### 3. Pragma Comments (Required)
+
+**Above** each `#pragma HLS`, there must be three lines of explanation:
+
+```cpp
+// [Technique_Name]: [What it does in one line]
+// Parameters: [Specific values and WHY these values]
+// Rationale:  [Why needed - what problem does it solve]
+#pragma HLS ...
+```
+
+Example:
+```cpp
+// Array Partition: Creates 2 memory banks for parallel access
+// Parameters: cyclic factor=2 (balance: 2x bandwidth vs 2x BRAM cost)
+// Rationale:  Eliminates memory port bottleneck (II=128 indicated single-port limit)
+#pragma HLS ARRAY_PARTITION variable=shift_reg cyclic factor=2 dim=1
+
+// Pipeline with Rewind: Enables overlapping iterations without gaps
+// Parameters: II=1 target, rewind for finite loops
+// Rationale:  Maintains pipeline efficiency from Iteration #3
+#pragma HLS PIPELINE II=1 rewind
+
+// Partial Unroll: Processes 2 operations per cycle in parallel
+// Parameters: factor=2 (MUST match partition factor - Golden Rule)
+// Rationale:  Exploits dual memory bandwidth created by partition
+#pragma HLS UNROLL factor=2
+```
+
+---
+
+### Examples
+
+#### ✓ Conforming Example — with .h and .inc files
+
+```cpp
+// === design.h ===
+#ifndef MATMUL_H
+#define MATMUL_H
+
+#include <ap_int.h>
+
+#define N 16
+typedef ap_int<16> data_t;
+typedef ap_int<32> acc_t;
+
+void matmul(data_t A[N][N], acc_t C[N][N]);
+
+#endif
+
+// === design.cpp ===
+// ============================================================================
+// MATMUL_16x16 - Iteration #2: Loop Tiling + Array Partition
+// ============================================================================
+// Previous: Iteration #1 (II=16 cycles, baseline triple-nested loop)
+// Target: II=1 per inner loop iteration
+//
+// Problem Identified:
+// - II=16 = matrix dimension → memory port bottleneck on arrays A and B
+//
+// Synthesis Result: II=1 cycles, latency=4112 cycles, timing met ✓
+// Resources: DSP=16, LUT=2048, FF=1536, BRAM_18K=0
+//
+// Optimizations Applied:
+// 1. Array Partition (complete on dim=2 for A, dim=1 for B):
+//    - What:       Fully partition inner dimensions for parallel column/row access
+//    - Why:        Inner loop accesses A[i][k] and B[k][j], need parallel read
+//    - Parameters: complete (N=16, small enough for full partition)
+//    - Result:     Memory bottleneck eliminated, II=1 achieved
+//
+// 2. Pipeline on innermost loop:
+//    - What:       Pipeline the k-loop (dot product accumulation)
+//    - Why:        With partition, all data available in parallel
+//    - Parameters: II=1 target
+//    - Result:     II=1 achieved with full partition
+//
+// Applied Rules:
+//    - R035: Always apply PIPELINE to innermost loop.
+//    - P003: Must completely overlap load, compute, and store.
+//    - Match partition dimension to access pattern for maximum bandwidth.
+// ============================================================================
+
+#include "design.h"
+#include "weights.inc"
+
+void matmul(data_t A[N][N], acc_t C[N][N]) {
+    // Array Partition: Full partition on A's columns and B's rows
+    // Parameters: complete on dim=2(A), dim=1(B) (N=16, affordable)
+    // Rationale:  Inner loop reads A[i][k] and B[k][j], need all k values in parallel
+    #pragma HLS ARRAY_PARTITION variable=A complete dim=2
+    #pragma HLS ARRAY_PARTITION variable=B complete dim=1
+
+    for (int i = 0; i < N; i++) {
+        for (int j = 0; j < N; j++) {
+            acc_t sum = 0;
+            for (int k = 0; k < N; k++) {
+                // Pipeline: Innermost loop for dot product
+                // Parameters: II=1 (full partition guarantees data availability)
+                // Rationale:  R035 - always pipeline innermost loop
+                #pragma HLS PIPELINE II=1
+
+                sum += A[i][k] * B[k][j];
+            }
+            C[i][j] = sum;
+        }
+    }
+}
+
+// === matmul_tb.cpp ===
+#include "design.h"
+#include "weights.inc"
+#include <iostream>
+
+int main() {
+    data_t A[N][N];
+    acc_t C[N][N], C_ref[N][N];
+
+    // Initialize test matrix A
+    for (int i = 0; i < N; i++)
+        for (int j = 0; j < N; j++)
+            A[i][j] = (data_t)(i + j);
+
+    // Golden reference (software computation using B from weights.inc)
+    for (int i = 0; i < N; i++)
+        for (int j = 0; j < N; j++) {
+            acc_t sum = 0;
+            for (int k = 0; k < N; k++)
+                sum += (acc_t)A[i][k] * (acc_t)B[k][j];
+            C_ref[i][j] = sum;
+        }
+
+    // DUT call
+    matmul(A, C);
+
+    // Verify results
+    int errors = 0;
+    for (int i = 0; i < N; i++)
+        for (int j = 0; j < N; j++)
+            if (C[i][j] != C_ref[i][j]) errors++;
+
+    std::cout << (errors ? "FAIL" : "PASS")
+              << " (errors=" << errors << ")" << std::endl;
+    return errors;
+}
+
+// === weights.inc ===
+// Fixed weight matrix B (pre-computed coefficients)
+static const data_t B[N][N] = {
+    {1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0},
+    {0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0},
+    // ... (remaining 14 rows of identity matrix omitted for brevity)
+    {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1}
+};
+```
+
+> **Example note**: `// === design.h ===`, `// === design.cpp ===`, `// === matmul_tb.cpp ===`, `// === weights.inc ===` are separator lines; during restoration, split by separator lines — separator lines themselves are not written to files. File order is [.h] → .cpp → testbench → [.inc]. If the project has no `.h` file, the code_snapshot starts directly with `// === {name}.cpp ===`. If the project has no `.inc` file, code_snapshot ends after the testbench section.
+
+#### ✗ Non-conforming Example (missing critical information)
+
+```cpp
+// Optimized FIR with partition and unroll
+// Applied Rules: P003, P004     ← Only codes, no rule_text, cannot understand
+void fir(data_t *y, data_t x) {
+    static data_t shift_reg[N];
+    #pragma HLS ARRAY_PARTITION variable=shift_reg cyclic factor=2
+    // ↑ No pragma comment: unknown why cyclic was chosen, why factor=2
+
+    for (...) {
+        #pragma HLS PIPELINE II=1 rewind
+        #pragma HLS UNROLL factor=2
+    }
+}
+```
+
+**Non-conforming reasons**:
+- ✗ No separator lines (`// === fir.cpp ===`) and no testbench section
+- ✗ No file header (unknown which iteration this is, what it improved from)
+- ✗ Applied Rules has only codes without rule_text
+- ✗ No explanation for each pragma (why, parameter reasoning missing)
+- ✗ Cannot reproduce: others cannot know the basis for choosing factor=2
+
+---
+
+### Write Timing
+
+**Two-phase header comment**:
+
+| Phase | Timing | Content Written |
+|-------|--------|----------------|
+| **Step 6: Writing code** | Before csim/csynth | **Do not write header comment**. Pragma comments (three-line explanation above each `#pragma HLS`) are written during coding since they are part of the design intent |
+| **Step 8: After parsing report** | After csim + csynth **both succeed** | **Fill in complete header comment all at once** (same format as the examples): all fields (Previous, Target, Problem Identified, Synthesis Result, Resources, Optimizations Applied with Result, Applied Rules) come from the csynth report's measured data |
+
+> ❗ **Why not write header in Step 6?** Because csim or csynth may fail, and on failure, code_snapshot is not recorded. The header comment's Synthesis Result, Resources, and each Optimization's Result are all measured values that can only be filled in correctly after synthesis succeeds.
+
+**Trigger condition**: After csim + csynth **both succeed**, code_snapshot preparation must be completed **before** calling `complete_iteration` API.
+
+| Case | Handling |
+|------|----------|
+| csim failure | ✗ Do not record, do not prepare code_snapshot |
+| csynth failure | ✗ Do not record, do not prepare code_snapshot |
+| csim + csynth both succeed | ✓ **Immediately** prepare code_snapshot, regardless of whether II improved |
+
+**Preparation workflow** (must be completed before calling complete_iteration):
+
+```
+1. Confirm csim + csynth both succeeded
+2. Parse csynth report, get measured data (II, latency, timing, resources)
+3. Insert complete header comment at the very top of .cpp (before all #include):
+   - Project Name + Iteration #N + optimization name (title line)
+   - Previous: previous iteration's iteration_number, II, approach
+   - Target: this iteration's target
+   - Problem Identified: bottleneck root cause
+   - Synthesis Result: measured II, latency, timing (from csynth report)
+   - Resources: measured DSP, LUT, FF, BRAM (from csynth report)
+   - Optimizations Applied: each optimization's What/Why/Parameters/Result (measured values)
+   - Applied Rules: all rules used (rule_code + rule_text or plain rule_text)
+4. Assemble separator format in fixed order: [.h] → .cpp → testbench → [.inc]
+   - Each file preceded by `// === {filename} ===` separator line
+   - .h and .inc are optional (include if they exist in the project directory)
+5. Testbench confirmation: use the testbench that passed csim
+6. .inc confirmation: if .cpp contains `#include "*.inc"`, include the .inc file(s) as the last section(s)
+7. Execute Comment Quality Checklist
+8. Locally compute code_snapshot full text hash and compare with KB to confirm no duplicates (see code_hash section below)
+9. No duplicates → fill into complete_iteration's code_snapshot field
+```
+
+---
+
+### Comment Quality Checklist (must pass before calling complete_iteration)
+> Prerequisite: csim + csynth have both succeeded (do not enter this Checklist if either failed)
+
+- [ ] Header comment was filled in after synthesis succeeded (code .cpp does not contain header comment during writing)
+- [ ] Separator lines exist (`// === {filename} ===`) and file order is correct ([.h] → .cpp → testbench → [.inc])
+- [ ] Testbench section exists (the one that passed csim)
+- [ ] If .cpp contains `#include "*.inc"`, the corresponding .inc section(s) exist as the last section(s)
+- [ ] File header exists and is complete
+- [ ] Previous iteration has explicit reference (iteration_number, II value, approach)
+- [ ] **Synthesis Result line exists** (measured II, latency, timing — from csynth report)
+- [ ] **Resources line exists** (measured DSP, LUT, FF, BRAM — from csynth report)
+- [ ] Each Optimization has What / Why / Parameters (with reasoning) / **Result (measured value)**
+- [ ] **Applied Rules section exists**, all rules used in reasoning are recorded
+- [ ] Rules with rule_code: `P###/R###: rule_text` format
+- [ ] Rules without rule_code: plain rule_text also listed (must not omit)
+- [ ] Three-line explanation above each `#pragma HLS`
+- [ ] Parameter choices have reasoning (e.g., "factor=2 because...")
+- [ ] Others can reproduce the optimization from this alone (no additional information needed)
+- [ ] **All values are measured** (from csynth report, not expected values)
+
+> ❗ **If any item does not pass**: Go back to preparation workflow step 3, modify .cpp header comment (or pragma comment), reassemble code_snapshot, then re-execute the Checklist; only call `complete_iteration` after all items pass.
+
+---
+
+### code_hash Deduplication
+
+`code_hash` = **SHA256(full text of code_snapshot)**, automatically computed by the API. Local comparison beforehand can avoid duplicate submissions:
+
+```bash
+# Local computation (echo -n ensures no trailing newline, consistent with API Python encode('utf-8'))
+CODE_HASH=$(echo -n "$CODE_SNAPSHOT" | sha256sum | awk '{print $1}')
+
+# Compare with KB
+curl "{{GEN_KB_API}}/api/design/similar?project_type=fir&limit=20" \
+  | jq --arg h "$CODE_HASH" '.results[] | select(.code_hash == $h) | {iteration_number, ii_achieved}'
+# Has results → duplicate, ask user whether to still record
+# No results → continue calling complete_iteration
+```
+
+

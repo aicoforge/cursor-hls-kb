@@ -1,0 +1,380 @@
+# Copyright (c) 2026 AICOFORGE. All rights reserved.
+# CC BY-NC 4.0 — non-commercial use only. See LICENSE.
+# Commercial use: kevinjan@aicoforge.com
+
+# User Prompts - Comprehensive HLS Optimization Techniques
+# 
+# This file contains three parts:
+# - Part 1: General HLS optimization rules (P001-P068) from iterfix.mdc
+# - Part 2: Application-specific guidelines (P069-P083) that reference UG1399 rules
+# - Part 3: Systolic array architecture optimizations (P084-P105) not covered in UG1399
+#
+# All prompts are numbered with PXXX format for precise reference in the knowledge base.
+# These user prompts complement the official R### rules from UG1399.
+#
+# Database Integration:
+# - These prompts will be imported into the 'hls_rules' table with rule_type='user_defined'
+# - Each prompt is assigned a category for filtering
+# - The knowledge base API allows querying by rule_type, category, and project_type
+
+# ============================================================================
+# PART 1: GENERAL HLS OPTIMIZATION RULES (from iterfix.mdc)
+# ============================================================================
+# These are comprehensive best practices covering all aspects of HLS design.
+# Originally from iterfix.mdc with alwaysApply: true
+# Now organized with categories for selective application.
+
+# ------------------------------
+# Primary Targets
+# Category: optimization
+# ------------------------------
+
+- [P001] Always aim for II=1 and full DATAFLOW pipeline.
+
+- [P002] Use pure DATAFLOW structure.
+
+- [P003] Must completely overlap load, compute, and store.
+
+- [P004] Never introduce cross-iteration dependencies.
+
+- [P005] Allow only local recurrences inside the hot loop.
+
+- [P006] Prevent operator sharing across PEs.
+
+- [P007] Restrict element width to DSP-friendly sizes (≤18-bit operands, ≤48-bit accumulators typical).
+
+- [P008] Bind multiplication to DSP.
+
+- [P009] Compute total cycles analytically (T_CYCLES depends on pipeline depth and vector lanes).
+
+- [P010] Allocate enough instances for all concurrent PEs.
+
+# ------------------------------
+# Pipeline & Loop Rules
+# Category: pipeline
+# ------------------------------
+
+- [P011] Use #pragma HLS PIPELINE II=1 rewind on streaming or fixed-tripcount loops that run back-to-back.
+
+- [P012] Do not add rewind if state must reset each run.
+
+- [P013] Apply #pragma HLS DEPENDENCE false when the dependency is truly absent.
+
+- [P014] Merge loops into a single loop if their total iteration count is identical; consolidate shifting/selection/computation to reduce hazards.
+
+- [P015] Split input, compute, and output into separate functions or loops.
+
+- [P016] Fully UNROLL spatial loops and COMPLETE-partition PE state.
+
+- [P017] Insert FIFO (depth>=1) on any feedback path to break cycles.
+
+- [P018] Repeating updates on the same scalar (sum += …) in innermost loop is prohibited; move recurrence outward.
+
+- [P019] Strictly ensure innermost loop has no loop-carried dependency or conditional stall.
+
+- [P020] Resolve loop-carried dependencies by reorganizing code or buffering.
+
+- [P021] Apply #pragma HLS LOOP_TRIPCOUNT with sensible min/max for variable loops.
+
+- [P022] Pipeline inside each task with #pragma HLS PIPELINE.
+
+- [P023] Combine pipeline with UNROLL/FLATTEN/MERGE when beneficial.
+
+- [P024] Use function-level pipeline for continuous streaming kernels.
+
+# ------------------------------
+# Dataflow & Concurrency
+# Category: dataflow
+# ------------------------------
+
+- [P025] Use #pragma HLS DATAFLOW to overlap load, compute, and store.
+
+- [P026] No inter-task FIFOs in the hot loop to eliminate backpressure.
+
+- [P027] Drain boundary streams to maintain 1-producer-1-consumer and avoid stalls.
+
+- [P028] Move dataset-level for() loops outside load/compute/store so datasets overlap in time.
+
+- [P029] Partition design into modular functions; keep independent tasks separate under DATAFLOW.
+
+- [P030] Implement dispatcher → multi-engine → ordered writer pattern for dataset parallelism.
+
+- [P031] Preload data before streaming; emit with no backpressure.
+
+- [P032] Avoid loader stalls.
+
+# ------------------------------
+# Memory / Stream / Array Rules
+# Category: memory
+# ------------------------------
+
+- [P033] Off-chip access inside the hot loop is strictly prohibited.
+
+- [P034] Prefer neighbor-forwarding or in-place register shifts.
+
+- [P035] Never do per-step full-array memory copy.
+
+- [P036] Partition or bank arrays to meet port requirements.
+
+- [P037] Partition arrays touched by unrolled lanes so each lane gets its own register slice.
+
+- [P038] Fully PARTITION unrolled paths and accumulators.
+
+- [P039] Assign #pragma HLS STREAM depth>=1 for every stream; size to cover consumer latency and bursts.
+
+- [P040] Always widen stream width to remove overhead.
+
+- [P041] Increase FIFO depths to smooth bursts under overlap.
+
+- [P042] Must remove store-side stalls; use non-blocking stream reads.
+
+- [P043] Avoid serial feeding (one element per cycle).
+
+- [P044] Consolidate multi-PE outputs into one packed stream (e.g., full row/col per beat) to eliminate writer-side stalls.
+
+- [P045] Stream next input into local registers or buffers every cycle; no pre-read stage, no drain-only tail loop.
+
+- [P046] Add U lanes along the reduction/time dimension.
+
+# ------------------------------
+# Interface & Communication
+# Category: interface
+# ------------------------------
+
+- [P047] Do not write to AXI-Stream inside the hot pipelined compute loop.
+
+- [P048] Apply proper interface pragmas: s_axilite for scalars, m_axi for memories, axis for streams, ap_ctrl_hs at top.
+
+- [P049] Group related signals in structs; use AGGREGATE/DISAGGREGATE to control port mapping.
+
+- [P050] Define interface width consistency checks (assert input/output bitwidth alignment).
+
+- [P051] Read AXI4-Lite controls once at start, store locally, and distribute via args or streams.
+
+- [P052] For runtime-varying controls, send them as stream tokens and distribute to all tasks.
+
+# ------------------------------
+# Arithmetic & Logic
+#  (Revised note: align logic to data_types)
+# Category: data_types
+# ------------------------------
+
+- [P053] Use shift for power-of-two scaling instead of multiply/divide.
+
+- [P054] Avoid float/double unless IEEE-754 is required.
+
+- [P055] Convert constants and coefficients to fixed-point.
+
+- [P056] Declare const/static const arrays as ROM for LUT/BRAM inference.
+
+- [P057] Prefer plain combinational expressions over unnecessary loops.
+
+# ------------------------------
+# Simulation / Synthesis Guards
+# Category: synthesis
+# ------------------------------
+
+- [P058] Use __SYNTHESIS__ guard: in synthesis keep while(1); in simulation replace with finite/conditional loop.
+
+- [P059] Do not remove core pipelines; optimize them with PIPELINE/UNROLL/rewind instead.
+
+- [P060] Use == not >= to avoid repeated triggers under backpressure.
+
+# ------------------------------
+# Resource / Structural
+# Category: structural
+# ------------------------------
+
+- [P061] Prevent memory/operator conflicts with array partitioning or resource duplication.
+
+- [P062] Duplicate or template for multiple instances.
+
+- [P063] Balance latency across parallel branches with FIFO depth.
+
+- [P064] For true parallel hardware, do not inline or reuse the same function instance.
+
+# ------------------------------
+# Clean-up & Code Hygiene
+# Category: code
+# ------------------------------
+
+- [P065] Always remove unused code.
+
+- [P066] Initialize all variables and statics explicitly; add reset logic if non-zero initialization is required.
+
+- [P067] Avoid dynamic memory, OS calls, or standard containers.
+
+# ============================================================================
+# PART 2: APPLICATION-SPECIFIC GUIDELINES (Referencing UG1399 R### Rules)
+# ============================================================================
+# These prompts provide concrete optimization patterns for specific algorithms
+# and complement the general HLS methodology from UG1399.
+
+# ------------------------------
+# FIR Filter Optimization
+# Category: fir
+# ------------------------------
+
+- [P068] Merge related operations into single loops when possible by combining shifting, selection, and computation using conditionals (e.g., ternaries) to reduce loop-carried dependencies and hazards. See R039-R041 for dependency resolution.
+
+- [P069] Apply #pragma HLS PIPELINE II=1 rewind to performance-critical loops (R035-R037, R045), including finite-iteration loops, to enable overlapping execution of successive iterations without gaps.
+
+- [P070] Use ternary operators to conditionally select values within a single loop iteration, avoiding the need for separate conditional branches that may increase II. See R036 for II=1 targeting.
+
+# ------------------------------
+# CORDIC Algorithm Optimization
+# Category: cordic
+# ------------------------------
+
+- [P071] Replace floating-point multiplication with bit-shift operations in CORDIC algorithms to reduce DSP usage while maintaining precision. See R158-R161 for floating-point guidance.
+
+- [P072] Completely partition lookup tables using #pragma HLS ARRAY_PARTITION complete when targeting II=1 (R061, R082), allowing parallel access to all table elements.
+
+- [P073] Pre-rotate input coordinates to the convergence range before starting CORDIC iterations to avoid complex quadrant handling logic.
+
+# ------------------------------
+# General Loop Optimization
+# (Revised note: align loop to pipeline)
+# Category: pipeline
+# ------------------------------
+
+- [P074] When combining multiple operations in a loop, carefully analyze data dependencies to ensure operations can be overlapped without unintended serialization. See R039-R041 for dependency handling.
+
+- [P075] For operations that naturally produce multiple values per iteration, consider using struct returns or output arrays to maintain II=1. See R036 for II targeting.
+
+- [P076] When loop-carried dependencies cannot be eliminated, consider loop unrolling by a small factor (R051, R088-R089) to expose more parallelism opportunities.
+
+# ------------------------------
+# Memory Optimization
+# Category: memory
+# ------------------------------
+
+- [P077] For arrays accessed with constant strides, use cyclic partitioning (R061, R082) to distribute accesses across multiple banks.
+
+- [P078] When array size is a power of 2, use block partitioning (R061) for simpler address decoding and potentially better timing.
+
+- [P079] For shift registers or sliding windows, consider using circular buffers with modulo addressing to reduce storage requirements. See R196 for shift register modeling.
+
+# ------------------------------
+# Interface Optimization
+# Category: interface
+# ------------------------------
+
+- [P080] For streaming interfaces with variable-length packets, add explicit FIFO depth=<N> (R004, R024-R027) to prevent deadlock during back-to-back transfers.
+
+- [P081] When interfacing with external memory, use burst transfers with #pragma HLS INTERFACE m_axi bundle=<name> depth=<N> (R123) to improve bandwidth utilization.
+
+- [P082] For control signals that change infrequently, use s_axilite interface (R242-R244) with appropriate offsets to reduce hardware overhead.
+
+# ============================================================================
+# PART 3: SYSTOLIC ARRAY ARCHITECTURE OPTIMIZATIONS (Not Covered in UG1399)
+# ============================================================================
+# These prompts provide architectural guidance specific to systolic arrays that
+# is not present in the official UG1399 rules. They include data movement patterns,
+# temporal skewing, and RAW hazard elimination techniques essential for correct
+# systolic array implementations.
+#
+# Category: systolic (all prompts in Part 3)
+
+# ------------------------------
+# Core Architecture Pattern: RAW Hazard Elimination
+# ------------------------------
+
+- [P083] For systolic arrays, ALWAYS use separate next-state arrays (a_next, b_next) and valid flags (a_vn, b_vn) to eliminate read-after-write (RAW) hazards. Structure each timestep iteration in three phases: (1) compute next state from current PE neighbors, (2) update all PE states simultaneously from next-state arrays, (3) perform MAC operations. This prevents reading and writing the same register in one cycle, which violates R035-R037 pipeline requirements.
+
+- [P084] Apply #pragma HLS ARRAY_PARTITION complete (per R061, R082) to ALL critical arrays in systolic designs: PE array, a_next, b_next, a_vn, b_vn, and c_partial arrays. Complete partitioning is mandatory for II=1 (R036) as it creates parallel hardware access to all PEs simultaneously without memory port conflicts (R080-R083).
+
+- [P085] Place #pragma HLS PIPELINE II=1 (R035-R037) ONLY on the main time-step loop (t loop), not on inner spatial loops (i, j loops). Inner PE loops must be fully unrolled (implicitly via complete partition) to enable parallel operation. Pipelining spatial loops would serialize PE operations and prevent systolic wave propagation.
+
+# ------------------------------
+# Input Skewing: Temporal Data Alignment
+# ------------------------------
+
+- [P086] Implement proper input skewing for systolic arrays: inject A matrix elements with row-based temporal skew (row i enters at time t=i), and B matrix elements with column-based temporal skew (column j enters at time t=j). Without skewing, data arrives at all PEs simultaneously instead of propagating as a wave, causing incorrect computation. This is a systolic-specific requirement not covered in UG1399.
+
+- [P087] For rightmost column PEs (j=SIZE-1), data flows from A_tile with row skew logic: if (t >= i && t - i < tile_m) then valid=true, reading A_tile[i][t-i]. For bottom row PEs (i=SIZE-1), data flows from B_tile with column skew: if (t >= j && t - j < tile_n) then valid=true, reading B_tile[t-j][j]. The skew ensures that element A[i][k] and B[k][j] arrive at PE[i][j] simultaneously at the correct time.
+
+- [P088] Internal data movement uses strict neighbor-to-neighbor transfer: a_next[i][j] = pe[i][j+1].a (left shift from right neighbor), b_next[i][j] = pe[i+1][j].b (upward shift from bottom neighbor). Edge PEs receive from input tiles with skew (P087), all other PEs receive from spatial neighbors. This creates the characteristic systolic wave pattern.
+
+# ------------------------------
+# Valid Signal Management: Data Flow Control
+# ------------------------------
+
+- [P089] Propagate valid flags alongside data: a_vn[i][j] indicates if a_next[i][j] contains valid data, b_vn[i][j] for b_next[i][j]. Perform MAC (pe[i][j].c += a*b) ONLY when both pe[i][j].va AND pe[i][j].vb are true. This prevents accumulating garbage values during array fill/drain phases and at partial tile boundaries.
+
+- [P090] Calculate total time steps as T = SIZE + tile_m + tile_n to ensure all valid data propagates through the array. Use conservative upper bound T = 3*SIZE for simplicity. Insufficient time steps truncate computation; excessive steps waste cycles but don't affect correctness. This timing calculation is systolic-specific and not covered by loop tripcount guidance (R061-R065).
+
+# ------------------------------
+# Blocking and Accumulation: Large Matrix Handling
+# ------------------------------
+
+- [P091] For blocking matrix multiplication (when MAX > SIZE), use local c_partial[SIZE][SIZE] array (with complete partition per R061) to accumulate partial results from multiple k-tiles. Each (m,n) output block requires summing contributions from all k-tiles: C[m][n] = Σ(k-tiles) A[m][k] * B[k][n]. This blocking strategy is not addressed in UG1399 dataflow or memory rules.
+
+- [P092] After each k-tile completes systolic computation (all T timesteps), extract valid pe[i][j].c values into c_partial[i][j] for positions where i < tile_m AND j < tile_n. Then reset pe[i][j].c = 0 before starting next k-tile. Failure to reset causes incorrect accumulation across k-tiles.
+
+- [P093] After all k-tiles complete for an (m0, n0) output block, write c_partial to final output matrix C with proper boundary handling: for i in [0,tile_m), j in [0,tile_n): C[m0+i][n0+j] = c_partial[i][j]. Handle partial tiles at matrix edges where tile_m < SIZE or tile_n < SIZE by checking boundary conditions.
+
+# ------------------------------
+# Tile Loading Strategy: Memory Layout Alignment
+# ------------------------------
+
+- [P094] Load A tiles in row-major order (consecutive columns of same row are adjacent in memory) and B tiles in column-major order (consecutive rows of same column are adjacent) to align with systolic data flow direction. A flows left (across rows), B flows up (across columns). This memory layout is critical for efficient burst access (R014, R123) but the systolic-specific layout requirement is not in UG1399.
+
+- [P095] For partial tiles at matrix boundaries, explicitly pad with zeros in unused positions. Calculate actual tile dimensions: tile_m = min(SIZE, M - m0), tile_n = min(SIZE, N - n0), tile_k = min(SIZE, K - k0). Zero-pad A_tile[i][j] for i >= tile_m or j >= tile_k, and B_tile[i][j] for i >= tile_k or j >= tile_n. Non-zero padding causes incorrect accumulation.
+
+# ------------------------------
+# Stream Interface Configuration: Systolic I/O
+# ------------------------------
+
+- [P096] For AXIS streaming interfaces (R005) in systolic designs, set FIFO depth (R024-R027) to cover worst-case pipeline latency: depth >= SIZE*SIZE + overhead. For SIZE=8 designs, use depth=256 as a safe default. Insufficient depth causes backpressure stalls that prevent II=1 (R036). The systolic-specific depth calculation (SIZE*SIZE) is not provided in general FIFO guidance.
+
+- [P097] Implement blocking read/write (R006) for stream interfaces and use #pragma HLS PROTOCOL fixed for reliable handshaking. Guard all stream operations (.read()/.write()) with valid conditions to prevent reading empty FIFOs or writing to full FIFOs, which cause deadlock (R028-R031). This complements but extends UG1399 streaming guidance for systolic patterns.
+
+# ------------------------------
+# Common Pitfalls: Critical Errors to Avoid
+# ------------------------------
+
+- [P098] NEVER read and write the same PE state array in the same clock cycle within a single pipelined iteration (violates R035-R037 pipeline semantics). Example of INCORRECT code: pe[i][j].a = (j==SIZE-1) ? input : pe[i][j+1].a; /* read */, then pe[i][j].c += pe[i][j].a * pe[i][j].b; /* write same cycle */. This creates combinational loops or unintended register read-write conflicts. ALWAYS use the two-phase pattern with a_next/b_next (P083).
+
+- [P099] NEVER omit input skew logic (P086-P087). Without proper temporal skew, data will not align correctly at PEs: all A/B elements arrive simultaneously instead of staggered, causing PE[i][j] to multiply wrong elements. Even if synthesis succeeds with II=1, functional results will be incorrect. This is the most common systolic implementation error and is not mentioned in UG1399.
+
+- [P100] NEVER forget to partition the next-state arrays (a_next, b_next, a_vn, b_vn) with complete (R061). Unpartitioned next-state arrays create memory bottleneck: SIZE*SIZE PEs competing for 1-2 memory ports prevents II=1 (R080-R083). Synthesis reports will show II > 1 with memory dependency violations.
+
+- [P101] NEVER use the same fixed time-step count (T) for all tile sizes. When processing partial tiles (tile_m < SIZE or tile_n < SIZE), using T = 3*SIZE wastes cycles. Recalculate T = SIZE + tile_m + tile_n for each tile, or use conservative T = 3*SIZE and accept minor inefficiency. Using T < required truncates valid data propagation.
+
+# ------------------------------
+# Debug and Verification: Quality Assurance
+# ------------------------------
+
+- [P102] For C simulation debugging, add printf statements inside the main time-step loop to print pe[i][j].va, pe[i][j].vb, and pe[i][j].c at each time step t. Verify that valid flags propagate correctly with the expected skew pattern: va[i] starts at t=i, vb[j] starts at t=j. Check that MAC operations only occur when both flags are true. This validates timing before synthesis.
+
+- [P103] In synthesis reports, verify: (1) main time-step loop achieves Trip Count=T with II=1 (R036), (2) all critical arrays show "ARRAY_PARTITION complete" status (R061), (3) no memory dependencies reported for PE array or next-state arrays (R080-R083), (4) resource usage (DSP, LUT, FF, BRAM) is reasonable for SIZE*SIZE PEs. II > 1 or memory warnings indicate missing partitioning or RAW hazards.
+
+- [P104] For co-simulation (R215-R218), test with: (1) full tiles (SIZE x SIZE), (2) partial tiles with non-multiple dimensions (e.g., M=13, N=15, K=11 with SIZE=8), (3) edge cases (M=SIZE-1, single tile), (4) maximum size (M=N=K=MAX). Verify cycle-accurate RTL matches C simulation results. Partial tile bugs often only appear in co-simulation, not C simulation.
+
+# ============================================================================
+# INTEGRATION NOTES
+# ============================================================================
+# - Part 1 prompts (P001-P067) from iterfix.mdc provide comprehensive general HLS best practices
+#   - Originally had alwaysApply: true
+#   - Now categorized for selective application: optimization, pipeline, dataflow, memory, interface, resource
+# 
+# - Part 2 prompts (P068-P082) complement UG1399 rules for specific algorithms
+#   - Categorized by application type: fir, cordic, optimization, memory, interface
+# 
+# - Part 3 prompts (P083-P104) provide systolic architecture details absent from UG1399
+#   - All categorized as 'systolic' for easy filtering
+# 
+# - Use Part 1 for general HLS optimization across all projects
+# - Use Part 2 + UG1399 R### rules for specific algorithms (FIR, CORDIC, etc.)
+# - Use Part 3 for correct systolic array implementation with proper skewing and RAW elimination
+# 
+# - All parts work together: R### provides tools (PIPELINE, PARTITION), 
+#   P### provides patterns, architecture, and best practices
+#
+# - Query examples:
+#   - For general optimization: GET /api/rules/effective?rule_type=user_defined&category=optimization
+#   - For pipeline rules: GET /api/rules/effective?rule_type=user_defined&category=pipeline
+#   - For FIR optimization: GET /api/rules/effective?rule_type=user_defined&category=fir
+#   - For systolic arrays: GET /api/rules/effective?rule_type=user_defined&category=systolic
+#   - For all user prompts: GET /api/rules/effective?rule_type=user_defined

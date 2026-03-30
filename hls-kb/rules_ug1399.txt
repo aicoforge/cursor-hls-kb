@@ -1,0 +1,299 @@
+# Copyright (c) 2026 AICOFORGE. All rights reserved.
+# CC BY-NC 4.0 — non-commercial use only. See LICENSE.
+# Commercial use: kevinjan@aicoforge.com
+
+# Vitis HLS Code Guidelines
+# Category: dataflow
+- [R001] Always use #pragma HLS DATAFLOW at the top scope to enable task-level parallelism across independent functions or loops.
+- [R002] Ensure producers and consumers are connected with minimal cross-dependencies to achieve true parallel execution.
+- [R003] Always exchange data between dataflow processes using handshake channels like hls::stream or ping-pong buffers.
+- [R004] Declare hls::stream<T> with #pragma HLS STREAM depth=<N>, ensure at least depth=1 to avoid deadlock, and prefer moderate depth (8–16) if unsure.
+- [R005] Map top-level stream ports to AXI-Stream or ap_fifo interfaces so they become true FIFO signals in RTL.
+- [R006] Always use blocking reads and writes on hls::stream channels in dataflow regions to ensure natural synchronization through backpressure.
+- [R007] For every stream read in one task, ensure there is a matching write in another task, and vice versa.
+- [R008] Avoid unbroken dependency cycles in the dataflow graph.
+- [R009] If a feedback path is required, insert a FIFO with sufficient depth and at least one element of delay to break the cycle.
+- [R010] Do not use pure feedback between dataflow processes unless a buffer is present.
+- [R011] If simulation shows deadlock or stalls, increase FIFO depth or refactor to remove the cycle.
+- [R012] Structure dataflow tasks to overlap computation, input reading, and output writing.
+- [R013] Implement separate functions for input, compute, and output, and connect them with hls::stream channels.
+- [R014] Pipeline each stage internally with #pragma HLS PIPELINE so multiple data chunks are processed concurrently.
+- [R015] Ensure the design sustains one new data item per cycle across the full accelerator pipeline.
+- [R016] Do not communicate between dataflow processes using global or static variables.
+- [R017] Never share arrays or variables across tasks without handshake channels.
+- [R018] Each dataflow process must only operate on local variables and its stream I/O.
+- [R019] If multiple tasks need a common array, convert it into a stream or use a double-buffer scheme instead of shared access.
+- [R020] Do not inline functions that should run as separate tasks in a dataflow region.
+- [R021] Keep concurrent tasks as distinct functions or loops with their own stream interfaces.
+- [R022] Do not call the same function instance twice inside dataflow unless they are duplicated or templated to create separate hardware.
+- [R023] Do not reuse the same function instance for multiple tasks in a dataflow region, because it forces sequential execution and breaks parallelism.
+- [R024] Do not leave hls::stream FIFO depths at default values.
+- [R025] Always set FIFO depth large enough to cover consumer pipeline latency or input bursts.
+- [R026] Too shallow a FIFO can cause stalls or deadlock; increase depth to maintain throughput.
+- [R027] If unsure, use a moderate depth and adjust after performance analysis.
+- [R028] Do not ignore HLS tool warnings about potential deadlock in dataflow regions.
+- [R029] Deadlock usually indicates a cycle with insufficient buffering or a dependency issue.
+- [R030] Fix deadlocks by inserting a FIFO of depth >= 1 in the cycle or restructuring to remove zero-latency dependencies.
+- [R031] If a producer and consumer wait on each other with an empty FIFO, add extra buffering or decouple the read/write sequence.
+- [R032] Do not apply #pragma HLS DATAFLOW to tasks with strict sequential dependencies.
+- [R033] If Task B depends on the full completion of Task A, keep them sequential or restructure the algorithm.
+- [R034] Using dataflow on dependent tasks adds complexity and FIFOs without performance gain.
+# Category: pipeline
+- [R035] Apply #pragma HLS PIPELINE to innermost or performance-critical loops.
+- [R036] Always target Initiation Interval (II) = 1 so the loop accepts new data each cycle.
+- [R037] Place the PIPELINE pragma at the loop definition, or at the function definition to pipeline the entire function.
+- [R038] Use higher II values only if resource limits or dependencies prevent II=1.
+- [R039] Resolve loop-carried dependencies to achieve the target Initiation Interval (II).
+- [R040] Reorganize computations or use techniques like double buffering to remove true dependencies.
+- [R041] If a variable is reused across iterations, separate it per iteration (e.g. index by loop counter) or declare it static if it represents persistent state.
+- [R042] Only apply #pragma HLS DEPENDENCE ... false for dependencies you are certain are false.
+- [R043] Use the II=<N> option in #pragma HLS PIPELINE to specify the target initiation interval.
+- [R044] HLS defaults to II=1; set higher II only if dependencies or resource limits require it.
+- [R045] Use the rewind option for infinite or streaming loops so pipeline registers are reused across iterations.
+- [R046] Pipelined functions inherently auto-rewind and can process streaming data continuously without termination.
+- [R047] Use #pragma HLS PIPELINE ... enable_flush (or flushable/free_running style) for loops that may pause due to lack of input or feedback paths.
+- [R048] A flushable pipeline continues shifting data even without new inputs, preventing stalls and deadlocks.
+- [R049] Apply flushable or free_running only when needed, since they may increase resource usage or raise II.
+- [R050] Combine pipelining with loop optimizations like unroll, flatten, and merge for best performance.
+- [R051] Unroll small loops by a factor (e.g. 2 or 4) to expose parallelism, and ensure enough memory ports with #pragma HLS ARRAY_PARTITION.
+- [R052] Use #pragma HLS LOOP_FLATTEN to collapse nested loops into one larger pipeline when nested structure is unnecessary.
+- [R053] Apply #pragma HLS LOOP_MERGE to combine consecutive independent loops and reduce pipeline restart overhead.
+- [R054] Use these transformations judiciously and always verify functional correctness.
+- [R055] Use #pragma HLS LOOP_TRIPCOUNT on loops without compile-time constant bounds to guide optimization.
+- [R056] Set sensible min and max tripcount values based on expected iteration range.
+- [R057] Tripcount is a hint, not a hard limit; it helps with scheduling, FIFO sizing, and memory bursts.
+- [R058] For loops with data-dependent exits, provide an upper bound via tripcount and use assert() to enforce assumptions.
+- [R059] Do not ignore loops with II > 1; always identify the cause.
+- [R060] Common causes include memory port conflicts, computational dependencies, or limited hardware resources.
+- [R061] Use #pragma HLS ARRAY_PARTITION to create multiple memory banks and allow concurrent accesses.
+- [R062] Increase resource budgets or modify the algorithm to remove bottlenecks when possible.
+- [R063] Accept II > 1 only as a deliberate trade-off (e.g. saving area); otherwise always strive for II=1.
+- [R064] Do not write loop code with inherent serialization that prevents pipelining.
+- [R065] Avoid back-to-back dependent operations on the same variable across iterations.
+- [R066] If each iteration depends on the previous, HLS will raise II and lose concurrency.
+- [R067] Restructure algorithms using techniques like arrays or indexed storage to allow independent parallel iterations.
+- [R068] Do not use recursion in pipelined functions or loops; hardware cannot support it.
+- [R069] Avoid unbounded while or for loops that lack a compile-time termination.
+- [R070] If a continuous process is required, use a static steady-state loop with a fixed max tripcount.
+- [R071] For true free-running pipelines, use ap_ctrl_none to design always-running processes explicitly.
+- [R072] Do not apply #pragma HLS PIPELINE at the function level unless the design is meant to be a continuous streaming process.
+- [R073] Function-level pipelining treats the function as auto-rewind, which is only correct for always-running streaming kernels.
+- [R074] For functions that must compute a result and return, pipeline the internal loops instead of the whole function.
+- [R075] Prefer loop-level pipelining to achieve performance goals; avoid function-level pipeline unless explicitly required.
+- [R076] Do not write pipelined loops with multiple exit points or break conditions.
+- [R077] Multiple exits complicate control logic and often increase II or reduce performance.
+- [R078] If early termination is needed, restructure the loop to have a single exit or use a flag checked at the loop head.
+- [R079] For data-dependent termination, consider using a flushable pipeline to avoid stalls.
+- [R080] Do not ignore resource conflicts when pipelining; parallel iterations may compete for the same hardware.
+- [R081] If two iterations access the same memory port or math unit, the pipeline will stall and II will increase.
+- [R082] Avoid conflicts by using dual-port BRAMs, adding memory banks, or applying #pragma HLS ARRAY_PARTITION.
+- [R083] Plan memory and operator resources explicitly for parallel access; do not rely on the tool to resolve conflicts automatically.
+- [R084] Do not fully unroll large loops without verifying resource budgets.
+- [R085] Be aware that unrolling replicates hardware, which increases area and may reduce clock frequency.
+- [R086] Do not fully unroll large loops unless resources and timing can support it.
+- [R087] Prefer pipelining with II=1 to achieve one iteration per cycle without full replication.
+- [R088] Use partial unrolling only when needed to expose parallelism or remove bottlenecks.
+- [R089] Choose an unroll factor that balances performance needs with available resources.
+# Category: hierarchical
+- [R090] Partition the design into multiple functions, each handling a distinct stage of computation.
+- [R091] Encapsulate one primary loop or kernel per function to optimize it in isolation.
+- [R092] Use hierarchical partitioning to improve clarity and enable concurrency.
+- [R093] Place independent functions under #pragma HLS DATAFLOW to run them in parallel and increase throughput.
+- [R094] Connect functions via arguments: use pointers/arrays for large data and hls::stream for streaming data.
+- [R095] In a top-level function with multiple sub-functions, apply #pragma HLS DATAFLOW and connect them with static hls::stream<T>.
+- [R096] Always assign FIFO depth with #pragma HLS STREAM depth=<N> to avoid deadlock and control buffering.
+- [R097] At the top function, assign appropriate interface pragmas: axis for streams, m_axi for memory, s_axilite for config, and ap_ctrl_hs or ap_ctrl_none for control.
+- [R098] Use #pragma HLS INLINE for small utility functions or those called only once to remove call overhead and enable better optimization.
+- [R099] Use #pragma HLS INLINE off for functions that should remain distinct hardware blocks.
+- [R100] Do not inline functions intended to run in parallel under #pragma HLS DATAFLOW.
+- [R101] Keep independent tasks as separate functions to preserve concurrency and avoid resource sharing conflicts.
+- [R102] Remember that by default, multiple calls to the same non-inlined function reuse one hardware instance sequentially.
+- [R103] If you need parallel hardware instances, call the function from separate dataflow processes.
+- [R104] Alternatively, duplicate the function code with different names or use C++ templates to force distinct hardware blocks.
+- [R105] Each unique function (by name or template parameters) generates one hardware block; plan replication explicitly.
+- [R106] Use #pragma HLS INTERFACE ap_ctrl_none port=return for internal sub-functions that run continuously inside dataflow.
+- [R107] ap_ctrl_none removes start/stop handshaking and treats the sub-function as a free-running process.
+- [R108] Only apply ap_ctrl_none to internal stages; the top-level kernel should keep a control handshake (e.g. s_axilite).
+- [R109] Ensure ap_ctrl_none functions loop or process continuously and do not stall or reset unexpectedly.
+- [R110] Balance latency between parallel branches that reconverge to avoid stalls or deadlock.
+- [R111] If one branch is faster, add FIFO depth to buffer its outputs until the slower branch catches up.
+- [R112] Optionally add small delays in the faster branch, though adjusting FIFO sizes is preferred.
+- [R113] Ensure that after startup, all parallel branches can produce one result per cycle without starving or overflowing.
+- [R114] Do not implement the entire algorithm as one monolithic function with deeply nested loops.
+- [R115] Break the design into logical sub-functions, such as preprocessing, core computation, and postprocessing.
+- [R116] Modular designs improve readability, simplify debugging, and allow individual optimization.
+- [R117] Use #pragma HLS DATAFLOW on independent functions to run them in parallel for higher throughput.
+- [R118] Do not use unsynthesizable constructs in any HLS module.
+- [R119] Prohibited items include dynamic memory allocation (malloc, new), deallocation (free, delete), recursion, and virtual functions.
+- [R120] Each function must map to a finite hardware structure with static resources.
+- [R121] Use static arrays or objects for fixed memory, and loops/unrolling instead of recursion for repeated behavior.
+- [R122] Do not rely on default interface synthesis for top-level functions; always specify interface pragmas explicitly.
+- [R123] Use #pragma HLS INTERFACE m_axi for arrays/pointers to external memory, s_axilite for scalar parameters, and axis for streaming ports.
+- [R124] Ensure the top-level function includes ap_ctrl_hs (AXI4-Lite control) unless ap_ctrl_none is intentionally chosen.
+- [R125] Proper interface pragmas are required for correct integration and optimal performance.
+- [R126] Do not use static or global variables across multiple functions unless intentional.
+- [R127] Sharing global or static state connects functions in hardware and may introduce dependencies or timing issues.
+- [R128] If independent state is required, pass data through function arguments or keep state self-contained in each function.
+- [R129] For true shared state (e.g., configuration), be aware it becomes a fixed hardware register or memory, not a port.
+- [R130] Do not introduce feedback loops in the system-level dataflow without careful planning.
+- [R131] Feedback complicates scheduling and often prevents effective task-level parallelism.
+- [R132] If feedback is required, insert FIFO buffers with sufficient depth and consider using #pragma HLS DATAFLOW carefully.
+- [R133] Ensure feedback loops cannot deadlock: provide initialization, break conditions, or an initial token in the FIFO.
+- [R134] Prefer acyclic (feed-forward) dataflow designs whenever possible.
+# Category: data_types
+- [R135] Prefer ap_int<W> or ap_uint<W> over native int/long when exact bit widths are needed.
+- [R136] Match bit width to the value range for efficient resource usage (e.g., ap_uint<10> for a 10-bit counter).
+- [R137] Use the smallest width that covers the range, but allow extra bits if carry/overflow is possible.
+- [R138] Remember that ap_int/ap_uint arithmetic is modulo the specified width, preventing out-of-range overflow.
+- [R139] Prefer ap_fixed<W,I> or ap_ufixed<W,I> over floating-point for efficient fractional math.
+- [R140] Specify total bit width (W) and integer bits (I) to balance range and precision.
+- [R141] Use fixed-point to reduce hardware cost while meeting numeric accuracy requirements.
+- [R142] Convert constants and variables to ap_fixed where feasible (e.g., coefficients, accumulators in filters).
+- [R143] Handle scaling and overflow carefully; HLS manages binary point arithmetic automatically.
+- [R144] Choose the smallest data type that fits the algorithm’s range requirements.
+- [R145] Use ap_uint<1> for boolean flags and narrow ap_int/ap_uint types for small ranges instead of default 32-bit int.
+- [R146] Prefer exact-width C types (uint8_t, uint16_t, etc.) or ap_int for non-standard sizes.
+- [R147] Smaller data types save FPGA resources and can reduce latency (smaller adders and multipliers).
+- [R148] Consider enumerated types for states or small value sets; HLS minimizes their bit width automatically.
+- [R149] Declare read-only tables as const (and static if inside a function) so HLS infers them as ROMs.
+- [R150] Use const values to enable constant propagation and let the tool optimize calculations.
+- [R151] Static const arrays are implemented as ROM (LUTs or block RAM) without write logic.
+- [R152] Always initialize static variables explicitly to avoid ambiguity, even though they default to zero.
+- [R153] Use C/C++ structs to group related signals (e.g., RGB pixel or complex number).
+- [R154] By default, top-level structs are aggregated into a single wide bus; internal arrays of structs are disaggregated into parallel arrays.
+- [R155] Use #pragma HLS AGGREGATE or DISAGGREGATE to override default mapping when needed.
+- [R156] Aggregate structs if you want them treated as one chunk of bits (e.g., one memory), or disaggregate to expose fields as separate ports.
+- [R157] Apply structs to improve readability and ensure related signals travel together.
+- [R158] Use float or double only when the algorithm truly requires IEEE-754 dynamic range or library math functions.
+- [R159] Be aware that floating-point operations consume significantly more FPGA resources and have higher latency than fixed-point.
+- [R160] Floating-point IP cores are pipelined (II=1 for add, mult, etc.) but results may differ slightly from software due to rounding and associativity.
+- [R161] Limit floating-point usage to where necessary; prefer fixed-point for most internal calculations and convert only at interfaces if required.
+- [R162] Account for conversion costs when mixing floating-point and fixed-point types.
+- [R163] Do not use malloc, free, or any dynamic memory allocation in HLS; hardware has no heap.
+- [R164] Avoid variable-length arrays and dynamic containers (std::vector, std::string, etc.).
+- [R165] All arrays must have fixed compile-time bounds.
+- [R166] If variable size is required, declare the maximum size and use loop limits to control usage.
+- [R167] Do not overuse the volatile keyword in HLS code.
+- [R168] Use volatile only for memory-mapped I/O or hardware/software status flags that truly require it.
+- [R169] Avoid marking arrays or normal variables as volatile; it disables key optimizations like burst combining and dead code removal.
+- [R170] Unnecessary volatile usage can severely reduce performance and block memory optimizations.
+- [R171] Do not rely on implicit type conversions that lose precision in HLS code.
+- [R172] Be explicit when narrowing types; always cast intentionally to smaller widths (e.g., int → ap_int<8>).
+- [R173] Avoid mixing signed and unsigned types without care; it can generate unexpected comparison logic.
+- [R174] Use consistent unsigned types for loop and array indices to prevent mismatched hardware.
+- [R175] Do not use double if float suffices; halving bit-width reduces resources and latency.
+- [R176] Do not use unions for type-punning; HLS does not support synthesizing them for bit reinterpretation.
+- [R177] Use ap_uint of equivalent width with manual bit slicing, or HLS reinterpret cast, for safe bit-level casting.
+- [R178] Avoid std::complex; define your own struct with separate real and imaginary fields.
+- [R179] Do not use multi-level pointers (e.g., pointer-to-pointer) as top-level function ports; HLS does not support them.
+- [R180] Do not perform arbitrary pointer arithmetic on top-level memory interfaces (AXI4).
+- [R181] Sequential pointer increments or array-style indexing are safe and allow burst transfers.
+- [R182] Non-sequential pointer jumps break burst inference and cause inefficient single transactions.
+- [R183] For random access, pass data as an array with ap_memory interface instead of using pointer arithmetic.
+- [R184] Do not cast interface pointers to different types (e.g., int* to char*); it may force byte-wise accesses or fail synthesis.
+- [R185] Do not use pointer-to-pointer types (e.g., type**) as top-level function ports; HLS cannot synthesize them.
+- [R186] Avoid arrays of pointers unless they reference fixed, known global objects.
+- [R187] Replace arrays of pointers with 2D arrays or flat arrays for synthesizable memory access.
+- [R188] Keep memory access patterns simple and regular so HLS can infer efficient memory architectures.
+# Category: structural
+- [R189] Treat C++ code as a hardware description; write with hardware structures in mind.
+- [R190] Use if/else and switch to describe conditional logic that maps to multiplexers.
+- [R191] Use loops to describe iterative hardware like shift registers or accumulators.
+- [R192] Model FSMs with enums for states and a switch-case for transitions, updating the state each iteration.
+- [R193] Use static variables to represent registers or storage that must retain values across cycles.
+- [R194] Use static local variables or globals to model registers or memories that persist across function calls.
+- [R195] Initialize static variables explicitly; uninitialized statics default to zero on reset.
+- [R196] Declare arrays as static for shift registers or delay lines so they retain values across calls.
+- [R197] Each function instance shares its static variables; use templates or unique functions if separate copies are required.
+- [R198] Use C++ templates to build parameterized and reusable hardware blocks.
+- [R199] Each unique template parameter set generates a separate hardware instance.
+- [R200] Pass constants such as bit-width, depth, or IDs as template parameters to control hardware size and uniqueness.
+- [R201] Templates help avoid code duplication while instantiating distinct logic (e.g., shift registers of different sizes).
+- [R202] Ensure all template code is synthesizable and resolves to a finite, unrolled design.
+- [R203] For pure combinational logic, compute outputs only from inputs; do not use static variables or memory.
+- [R204] For sequential logic, use static state to hold values across iterations or function calls.
+- [R205] Model sequential behavior with a static state variable, a switch/if block for transitions, and state updates each cycle.
+- [R206] Use loops or function calls to represent multi-cycle behavior, ensuring loop bounds reflect intended cycle counts.
+- [R207] Label loops when needed to clarify structure and improve readability.
+- [R208] Write C/C++ in a synthesis-friendly style that HLS can easily analyze and optimize.
+- [R209] Use simple for loops with clear, compile-time bounds; avoid recursion and deep call stacks.
+- [R210] Use bitwise operators (&, |, ^, <<, >>) for bit manipulations; all are synthesizable.
+- [R211] Prefer compile-time constants or enums for array bounds and switch cases.
+- [R212] Apply #pragma HLS UNROLL or PIPELINE to innermost loops to control replication or pipelining.
+- [R213] Ensure memory accesses have predictable indexing patterns; avoid irregular or unpredictable indices.
+- [R214] For random indexing, keep patterns regular or use dual-port memories for parallel reads/writes.
+- [R215] Always verify HLS designs at the C/C++ level before synthesis.
+- [R216] Write a testbench that feeds sample or random inputs and checks outputs.
+- [R217] Use C simulation to catch issues such as uninitialized variables, array out-of-range, or excessive combinational logic.
+- [R218] Validate that the design produces correct outputs and meets expected latency/throughput behavior.
+- [R219] Do not use recursion; hardware cannot synthesize functions with unbounded call depth.
+- [R220] Avoid unbounded while-loops with unpredictable exit conditions.
+- [R221] If variable loop bounds are required, add safety limits or apply #pragma HLS LOOP_TRIPCOUNT.
+- [R222] Ensure all functions and loops resolve to finite, predictable hardware.
+- [R223] Do not use OS features in synthesizable code; FPGA fabric has no operating system.
+- [R224] Remove or guard file I/O (fopen, printf), system calls, threads, and mutexes from synthesis paths.
+- [R225] Wrap debug-only code with #ifndef __SYNTHESIS__ so it runs in simulation but is ignored in synthesis.
+- [R226] Do not use standard library containers (vector, list, string, etc.) that require dynamic memory.
+- [R227] Use plain arrays, ap_int/ap_fixed, and structs to ensure synthesizable hardware mapping.
+- [R228] Do not assume C/C++ simulation behavior matches hardware implementation.
+- [R229] Always initialize variables before use; uninitialized values in hardware are undefined.
+- [R230] Avoid shifting or indexing beyond array bounds; results in hardware are incorrect or undefined.
+- [R231] Do not use function pointers or virtual functions; HLS requires deterministic hardware binding.
+- [R232] Avoid excessive use of global or static variables in HLS designs.
+- [R233] Each global variable becomes a persistent hardware resource that is always present.
+- [R234] Multiple writers to the same global create dependencies and may serialize access.
+- [R235] Prefer passing values through function arguments or interfaces instead of globals.
+- [R236] Reserve globals for true constants or carefully managed shared state.
+- [R237] Do not neglect reset behavior; always define initial values for registers and state.
+- [R238] HLS resets statics and globals to default (zero) unless explicitly initialized.
+- [R239] If non-zero or specific reset values are required, code them directly at declaration.
+- [R240] For shift registers or static arrays, preload with zeros or known patterns as needed.
+- [R241] With ap_ctrl_hs, the block restarts fresh each invocation; with ap_ctrl_none, add explicit reset logic if required.
+# Category: interface
+- [R242] Use AXI4-Lite (s_axilite) for all scalar control parameters and configuration registers.
+- [R243] Apply #pragma HLS INTERFACE s_axilite port=<variable> bundle=control for each scalar, including a return port.
+- [R244] Ensure exactly one port is marked port=return in the control bundle to manage start/stop/status.
+- [R245] Expose loop bounds, offsets, and algorithm modes as s_axilite ports for host configuration.
+- [R246] Follow this convention so the generated IP integrates easily with software control.
+- [R247] Read s_axilite control parameters once at the beginning of each invocation.
+- [R248] Store control values (e.g., threshold) in local variables and reuse them instead of re-reading the interface.
+- [R249] Pass control values as arguments to sub-functions if needed in multiple places.
+- [R250] If a control is constant across all runs, consider making it a template parameter or #define.
+- [R251] If control values must change during runtime or align with data, send them through a streaming interface.
+- [R252] Use an hls::stream of control tokens that travel in parallel with the data stream.
+- [R253] Duplicate or fork control tokens if multiple modules require the same value.
+- [R254] Forward control values downstream to keep modules working in lockstep with the same configuration.
+- [R255] Do not read the same control parameter independently in multiple parallel processes.
+- [R256] Read the control once, store it in a temp, and distribute it to all processes that need it.
+- [R257] Duplicate the control into multiple FIFOs or use a distributor function in dataflow to fan out values.
+- [R258] Ensure all processes use the identical control value for the same invocation to avoid mismatch.
+- [R259] Use ap_ctrl_none on the top function only for always-running dataflow engines.
+- [R260] In ap_ctrl_none mode, the IP starts automatically after programming and runs continuously.
+- [R261] Control registers (s_axilite) are still valid, but there is no done signal or automatic restart.
+- [R262] Manage lifecycle externally (reset/disable as needed) and handle control register updates carefully.
+- [R263] Apply this mode only for continuous streaming or static pipeline applications.
+- [R264] Do not assume AXI4-Lite control changes apply immediately during computation.
+- [R265] If a register is read once at start, updates are not visible until the next run.
+- [R266] Continuous reads may see updates, but mid-run changes can break assumptions and cause mismatches.
+- [R267] Only change control registers safely between accelerator runs, or apply reset before using new values.
+- [R268] Do not treat control registers as real-time adjustable unless the hardware FSM is explicitly designed to handle it.
+- [R269] Do not break one dataflow pipeline on a scalar/global control while assuming others stop too.
+- [R270] If parallel processes use a shared stop condition, ensure they all receive it in lockstep.
+- [R271] Avoid using global controls as direct break conditions inside parallel loops; this can cause deadlock or starvation.
+- [R272] Use handshake or stream-based control distribution to synchronize stops across all parallel processes.
+- [R273] Handle global stop conditions before entering the dataflow region, or partition input based on control.
+- [R274] Do not use static or global variables as shared control flags across functions.
+- [R275] A global in hardware is a physical register with no handshake; using it for control causes race conditions.
+- [R276] Only write to a global in one place if absolutely needed, and use it synchronously elsewhere.
+- [R277] Prefer passing control values through arguments or streams for explicit synchronization.
+- [R278] Remember that global scalars are not external interfaces unless declared as such with pragmas.
+- [R279] Always test accelerator behavior under different control parameter values (sizes, modes, thresholds).
+- [R280] Validate edge cases such as size=0 or maximum bounds to uncover hidden issues or deadlocks.
+- [R281] Check hardware timing and resource usage for all control values; larger bounds may affect II or memory.
+- [R282] Ensure control-dependent code paths are verified both in C simulation and on FPGA.
+- [R283] Do not overlook backpressure handling on streamed control signals.
+- [R284] Each module must read exactly one control token per data unit (or per defined protocol).
+- [R285] If a module fails to read, the control FIFO will stall; if it over-reads, it will wait forever.
+- [R286] Treat control streams with the same push/pop discipline as data streams.
+- [R287] Ensure downstream blocks consume each control token once; use pass-through or forwarding if multiple modules need it.
+

@@ -1,0 +1,468 @@
+---
+description: HLS Knowledge Base core rules: environment config, API endpoints, query strategy, rule system (Sections 1–5)
+alwaysApply: true
+---
+# Copyright (c) 2026 AICOFORGE. All rights reserved.
+# CC BY-NC 4.0 — non-commercial use only. See LICENSE.
+# Commercial use: kevinjan@aicoforge.com
+
+################################################################################
+# Section 1. Document Header & Summary
+################################################################################
+
+# HLS Knowledge Base Integration Rules
+
+> **Key Features**: Dual-tier rule system + Environment auto-detection + Two-track query strategy + Automatic recording
+
+## Dual-Tier Rule System
+
+- **Official rules (R###)**: General HLS best practices (UG1399), 287 rules
+- **User-defined (P###)**: Project optimization experience (extensible), 100+ rules
+- **Query**: `rule_type` parameter filter (official / user_defined)
+- **Reference**: `rule_code` exact reference (R### or P###)
+
+## API Endpoints
+
+**Query:**
+- `GET /health` — Check API service and database connection status (`status: healthy/unhealthy`; includes `error` description when unhealthy)
+- `GET /api/projects?type={type}` — List projects (**the only source for retrieving project_id before recording**, see Section 7 Step 2; params: `type` filter, `limit` default 50 max 200, `offset` pagination; returns `total`, `results[]`)
+- `GET /api/projects/{project_id}` — Get single project details (for verifying name / type, see Section 7 Step 2a)
+- `GET /api/design/similar?project_type={type}` — Query similar designs (`project_type` required; includes approach_description, pragmas_used, code_hash, ii_achieved, ii_target, latency_cycles, resource_usage, cursor_reasoning, user_specification, etc.; **excludes** code_snapshot / prompt_used / user_reference_code / reference_metadata; results sorted by `ii_achieved` ascending; add `target_ii` to return only results where `ii_achieved <= target_ii`; `limit` default 5 max 20; `resource_usage` is a JSON string requiring `json.loads()` to parse)
+- `GET /api/design/{iteration_id}/code` — Get full details (code_snapshot, cursor_reasoning, prompt_used, user_reference_code, user_specification, approach_description, code_hash, pragmas_used, iteration_number, project_name; **excludes reference_metadata**)
+- `GET /api/rules/effective` — Query rules and effectiveness statistics (params: `rule_type` accepts only `official`(R###) or `user_defined`(P###), other values return empty results; `category`; `project_type` filters statistics scope — rules with no records for that type still appear with `times_applied=0`; `min_success_rate` default 0.0; results sorted by `success_rate DESC, priority DESC`)
+- `GET /api/rules/categories` — Get all category list (dynamically from DB, changes with `hls_rules` table imports; currently 13: code, cordic, data_types, dataflow, fir, hierarchical, interface, memory, optimization, pipeline, structural, synthesis, systolic; includes technical categories like pipeline, memory and application categories like fir, systolic; **must call this endpoint before each two-track query to get the latest list**, see Section 5)
+- `GET /api/analytics/project/{project_id}/progress` — Synthesis progress and historical data (returns `total_iterations` and per-iteration: iteration_number, approach_description, ii_achieved, latency_cycles, timing_met, resource_usage, created_at; `ii_improvement` present from 2nd iteration onward (= previous ii − current ii); `resource_usage` is a JSON string requiring extra parsing, see Section 7 Step 4)
+
+**Write:**
+- `POST /api/design/complete_iteration` — Complete iteration record (**sole write entry point**; handles project creation + iteration record + synthesis result + rules effectiveness update + rollback info in one call; `iteration_number` is auto-calculated by API — if it returns `1` when a higher number is expected, an incorrect `project_id` was used)
+- `POST /api/projects` — Create new project (name must be unique within same type; duplicates return **409 Conflict** + `existing_project_id` — use that ID to continue recording)
+> For field formats, definitions, and instructions for all `complete_iteration` write fields, refer to Section 7.
+
+## Quick Navigation — Task → Section
+
+| When you need to... | Section | Key content |
+|---|---|---|
+| Confirm current machine, select correct API URL | Section 2 | hostname/IP auto-detection logic, Vitis HLS environment check |
+| Write a Python script that connects to PostgreSQL | Section 3 | `get_database_url()` function |
+| Query rules (R### / P###) before synthesis | Section 4 + 5 | Two-track query strategy, semantic match, statistical sort order (success_count / times_applied / priority) |
+| csim or csynth fails — stop, do not record | Section 4 | Iteration is not recorded; do not call `complete_iteration` |
+| Query best iterations from same-type projects | Section 5 Track 1 | `GET /api/design/similar?project_type=` |
+| Retrieve all Category names before two-track query | Section 5 | `GET /api/rules/categories` |
+| Query semantically relevant and statistically verified HLS rules | Section 5 Track 2 | `GET /api/rules/effective?category=` |
+| Retrieve full code for a specific iteration | Section 5 | `GET /api/design/{iteration_id}/code` |
+| Write three-line explanation above each `#pragma HLS` | Section 6 | Technique / Parameters / Rationale format |
+| Fill in file header comment after successful synthesis | Section 6 | Write only after csim + csynth both succeed; all values from csynth report |
+| Assemble code_snapshot | Section 6 | `// === {filename} ===` separator format |
+| Verify code_snapshot quality before recording | Section 6 | Comment Quality Checklist (16 items) |
+| Compute code_hash for deduplication | Section 6 | Local `sha256sum` comparison before calling API |
+| Retrieve project_id before recording (mandatory) | Section 7 Step 2 | `GET /api/projects?type=` + exact match on `project_name` |
+| Call `complete_iteration` to record iteration | Section 7 | Only write entry point; includes all required fields |
+| Handle 409 Conflict error | Section 7 Step 4a | Re-invoke using returned `existing_project_id` |
+| Create a new project | Section 7 | `POST /api/projects` |
+| Reproduce a specific historical iteration | Section 7 (final subsection) | Retrieve code_snapshot → restore files → generate run_hls.tcl |
+| Query all iterations and progress for a project | Section 7 | `GET /api/analytics/project/{project_id}/progress` |
+| User asks about rollback / delete / reset / backup | Section 4 | Always respond: "Requires system administrator authorization"; do not execute or provide guidance |
+
+**Write:**
+- `POST /api/design/complete_iteration` — Complete iteration record (the only write entry point)
+- `POST /api/projects` — Create new project
+
+## Best Practice (Mandatory)
+
+- **ALWAYS** query KB rules and similar designs before design
+- **ALWAYS** create local optimization_summary.md documentation
+- **ALWAYS** record to KB via `complete_iteration` after synthesis (not optional)
+- **Step 2 is mandatory** — Before recording an iteration, use `GET /api/projects?type={type}` + `project_name` exact match to retrieve `project_id` (see Section 7 Step 2: Query project_id); use `/api/design/similar` for learning similar designs — these have different purposes and must not be mixed
+- **iteration_number is automatically computed by the API** — the `complete_iteration` return value is the correct sequence number; no local calculation needed
+- **409 Conflict must be handled** — When receiving `project_name_conflict`, use the returned `existing_project_id` to re-invoke (see Section 7 Step 4a: API Error Handling)
+
+
+## API Response Supplement
+
+> The following lists only response structures and edge behaviors
+**`GET /api/projects`** — `type` parameter is optional; omitting it lists all projects (all types).
+**`GET /api/design/similar`** — Response outer layer contains a `query` object (`{project_type, target_ii, limit}`) + `results[]`. Non-existent `project_type` → `200 OK` + `results: []` (not 404).
+**`POST /api/projects`**
+- Request body: `name`(required), `type`(required), `description`(optional), `target_device`(optional, default `"xilinx_fpga_board_b"`)
+- Success: `{"project_id":"uuid", "name":"...", "type":"..."}`
+- 409: `{"detail":{"error":"project_name_conflict", "message":"...", "existing_project_id":"uuid"}}`
+**`GET /api/rules/effective`** — Response outer layer contains a `filters` object (`{project_type, category, rule_type, min_success_rate}`) + `rules[]`. Each rule additionally contains `id`(UUID), `source`(`"UG1399"`/`"User"`), `avg_ii_improvement`(float|null, null when never applied). Invalid `rule_type` values (e.g., `user_prompt`) do not raise an error — they return empty `rules: []`.
+**`GET /api/analytics/project/{project_id}/progress`** — Each iteration includes `iteration_id` (can be passed to `GET /api/design/{iteration_id}/code` to retrieve full code). Returns **404** when no iteration records exist.
+
+**Common empty-result troubleshooting**:
+- `results: []` / `rules: []` → Confirm `project_type` is lowercase (`fir` not `FIR`; API is case-sensitive)
+- `similar` empty → Remove `target_ii` parameter to query all; confirm the type has iteration records
+- `rules/effective` empty → Set `min_success_rate` to `0` to query all; then increase gradually (0.3 → 0.5 → 0.7)
+- `rules_recorded=0` (expected matches) → Confirm `rule_code` spelling is correct (`R001`–`R287` / `P001`–`P105`); use `GET /api/rules/effective?min_success_rate=0` to list all available rule_codes
+
+
+################################################################################
+# Section 2. Environment Configuration & Verification
+################################################################################
+
+## API Configuration
+
+Knowledge Base is deployed on **{{KB_HOST_NAME}}** ({{KB_HOST_IP}})
+
+**Access Methods**:
+- On {{KB_HOST_NAME}}: `{{KB_API_URL_LOCAL}}`
+- Other machines: `{{KB_API_URL_REMOTE}}`
+
+**API URL Auto-detection** (recommended):
+```bash
+if hostname | grep -q "{{KB_HOST_NAME}}" || \
+   [ "$(hostname -I | grep -o '{{KB_HOST_IP}}')" ]; then
+    KB_API="{{KB_API_URL_LOCAL}}"
+else
+    KB_API="{{KB_API_URL_REMOTE}}"
+fi
+```
+> After execution, KB_API is set to the correct API URL for the current machine.
+
+---
+
+## HLS Task Environment Verification (Mandatory)
+
+**Before running any HLS synthesis task, the current environment must be verified.**
+
+### Step 1: Environment Confirmation
+
+```bash
+echo "• Hostname:       $(hostname)"
+echo "• IP Address:     $(hostname -I | awk '{print $1}')"
+echo "• Vitis HLS:      $(which {{VITIS_HLS_CMD}} 2>/dev/null || echo '✗ Not installed')"
+echo "• Knowledge Base API: ${KB_API}"
+```
+
+### Step 2: Execute Task Based on Vitis HLS Availability
+
+**Detect Vitis HLS**:
+```bash
+source {{VITIS_HLS_SETTING_PATH}} 2>/dev/null && which {{VITIS_HLS_CMD}}
+```
+
+**✓ Vitis HLS available**:
+- Run HLS synthesis directly: `{{VITIS_HLS_CMD}} -f run_hls.tcl`
+- Access Knowledge Base using the auto-detected `KB_API` URL
+
+**✗ Vitis HLS not available**:
+- ❗ Inform user: Vitis HLS is not installed on this machine; cannot run HLS synthesis
+
+**Do not assume environment** — Always run `which {{VITIS_HLS_CMD}}` to confirm; do not rely solely on `user_info` to guess.
+
+### Step 3: Common Tool Check
+
+The Knowledge Base workflow depends on `curl` (API calls) and `jq` (JSON parsing).
+`python3` is a system prerequisite; UUID generation uses:
+```bash
+python3 -c "import uuid; print(uuid.uuid4())"
+```
+
+If `curl` or `jq` is not found, prompt user to run the following; **do not run sudo automatically**; wait for user authorization:
+```bash
+sudo apt-get install -y curl jq
+```
+
+
+################################################################################
+# Section 3. Database Connection Standards
+################################################################################
+
+## Database Script Creation Rules
+
+**Scope**: All Cursor-generated Python scripts that connect directly to PostgreSQL (including asyncpg, psycopg2) must use the `get_database_url()` function below.
+
+> This function is only for Cursor-generated helper scripts (test_*.py, verify_*.py, etc.).
+
+### Hard-Coding Prohibited
+
+```python
+# ✗ Hard-coded localhost (only works on {{KB_HOST_NAME}}; other machines fail to connect)
+DATABASE_URL = "postgresql://{{DB_USER}}:{{DB_PASS}}@localhost:{{DB_PORT}}/{{DB_NAME}}"
+
+# ✗ Hard-coded {{KB_HOST_IP}} (on {{KB_HOST_NAME}}, connects to itself via remote IP, slower)
+DATABASE_URL = "postgresql://{{DB_USER}}:{{DB_PASS}}@{{KB_HOST_IP}}:{{DB_PORT}}/{{DB_NAME}}"
+```
+
+> ❗ Neither approach works when switching machines — **you must use the `get_database_url()` function below**.
+
+### ✓ Mandatory Auto-Detection Function
+
+```python
+#!/usr/bin/env python3
+import socket
+
+def get_database_url():
+    """
+    Auto-detect current environment and return correct database connection URL
+    
+    Logic (same as Section 2 API URL auto-detection):
+    - On {{KB_HOST_NAME}} ({{KB_HOST_IP}}): use localhost
+    - On other machines: use {{KB_HOST_IP}}
+    """
+    hostname = socket.gethostname()
+    try:
+        host_ip = socket.gethostbyname(hostname)
+        if host_ip == "{{KB_HOST_IP}}" or hostname == "{{KB_HOST_NAME}}":
+            db_host, env = "localhost", "{{KB_HOST_NAME}}(local)"
+        else:
+            db_host, env = "{{KB_HOST_IP}}", f"{hostname}(LAN)"
+    except:
+        db_host, env = "{{KB_HOST_IP}}", "using LAN"
+    
+    print(f"✓ Environment: {env}, Database: {db_host}:{{DB_PORT}}")
+    return f"postgresql://{{DB_USER}}:{{DB_PASS}}@{db_host}:{{DB_PORT}}/{{DB_NAME}}"
+
+# Call at script start
+DATABASE_URL = get_database_url()
+```
+
+
+################################################################################
+# Section 4. Knowledge Base Rule System
+################################################################################
+
+## Operating Principles
+
+- **Cursor always operates via API**
+- `reference_metadata` is automatically written by `complete_iteration` with `_rollback_info` and `_rules_applied`; Cursor users do not need to manually operate on this field. `/api/design/similar` and `/api/design/{iteration_id}/code` do not return this field.
+- Dual-tier rule system architecture (R### official / P### user-defined; quantity based on actual import) — see Section 1
+
+## Query and Usage
+
+**Unified query**: Instead of querying by rule_type separately, filter by **category + effectiveness** in a unified manner (consistent with Section 5 two-track query strategy). Official rules and user-defined rules are mixed in the same result, sorted by `success_rate DESC, priority DESC`.
+
+```bash
+# Query all rules for a specific category (regardless of official / user_defined)
+curl "{{GEN_KB_API}}/api/rules/effective?category=pipeline&min_success_rate=0"
+
+# Query all rules for a specific project_type
+curl "{{GEN_KB_API}}/api/rules/effective?project_type=fir"
+```
+
+**Selection criteria** (highest to lowest priority):
+0. **rule_text semantic** — First confirm whether the rule description corresponds to the current technical bottleneck; rules that are off-topic are not selected regardless of how good their statistics are
+1. **success_rate** — Among semantically relevant rules, higher success rate is preferred (ratio of actual II improvement)
+2. **times_applied** — At equal success rate, more number of used rules are preferred (more thoroughly validated)
+3. **priority** — Rules with no track record (`times_applied = 0`) are sorted by `priority DESC` (priority=9 takes precedence)
+
+> The sorting above applies when semantic filtering hits multiple rules; if no semantic match, fall back to statistical filtering (`success_count > 0` → `times_applied DESC`; `= 0` → `priority DESC`) — see Section 5 Track 2.
+
+**❗ Behavior on rule_code match failure**: If the provided `rule_code` cannot be matched in KB, `rules_effectiveness` is not updated, but the iteration is still recorded normally. Please verify rule_code format is correct (R### or P###).
+
+## ❗ Distinction Between Two Types of Success
+
+| Case | Record iteration | success_count |
+|------|-----------------|---------------|
+| csim or csynth failure | ✗ Not recorded | N/A |
+| Success, **`ii_bneck`** decreased (see Section 7 「II Metric Priority」) | ✓ | +1 |
+| Success, **`ii_bneck`** unchanged or increased | ✓ | Unchanged |
+
+- `times_applied` always +1 (as long as csynth succeeds and rule matches)
+- `success_count` only +1 when **`ii_bneck`** actually decreases (**`rules_applied.success`** path — **not** driven by **`ii_top`** or latency alone)
+- `avg_ii_improvement` only includes weighted average of successful cases (denominator is `success_count`)
+
+> **II** in this table means **`ii_bneck`** (max pipelined-loop Interval), not top-level **`ii_top`**. Improvements visible only as **`ii_top`** or **latency** are documented in **`cursor_reasoning`** (Layer B narrative); they **do not** increment `success_count` unless **`ii_bneck`** also decreases.
+
+## Design Iteration Workflow
+
+**Before (Pre-Synthesis)**
+- Front-Capture: Scan user messages, maintain USER_REF_CODE / USER_SPEC (→ see Section 7)
+- Two-track query: Query similar designs (`/api/design/similar`) and KB rules (`/api/rules/effective`) (→ see Section 5)
+- Determine `previous_ii` baseline (→ see Section 7 「previous_ii Baseline Definition」 for two-layer priority rules)
+- Bind Rules: Bind selected rules to APPLIED_RULES; record reasoning in `cursor_reasoning` (→ see Section 7)
+
+**During (Implementation)**
+- Only produce the following four file types: `.h`, `.cpp`, `*_tb.cpp` (testbench), `.inc` (coefficient / lookup table data) — do not introduce other file types (e.g., `.hpp`, `.dat`, `.txt`, `.c`); if testbench needs reference data, embed it directly in `*_tb.cpp`
+- Add three-line pragma comment above each `#pragma HLS` (Technique / Parameters / Rationale)
+- ❗ Do not write file header comment at this stage (fill in all at once after csim + csynth succeed)
+
+**After (Post-Synthesis)**
+- csim or csynth failure → Stop, do not record this iteration
+- csim + csynth success → Parse csynth report for measured data, fill in file header comment (→ see Section 6), call `complete_iteration` to record (regardless of whether II improved → see Section 7), update local documentation
+- `rules_applied` **`success` = (`current_ii` < `previous_ii`)** — **`previous_ii` and `current_ii` MUST both be `ii_bneck`** (whether `previous_ii` is measured or estimated) → see Section 7 「II Metric Priority (`ii_bneck` vs `ii_top`)」and 「previous_ii Baseline Definition」
+
+**Fields required in local documentation** (`optimization_summary.md`):
+- rule_code, rule_text, category
+- previous_ii, previous_ii_source (measured/estimated/fallback), current_ii, improvement
+- success (true/false), reasoning
+
+## Data Management and Maintenance
+
+### Recording
+
+**Daily recording**: Use the `complete_iteration` API exclusively
+- ✓ Automatically writes `_rollback_info` and `_rules_applied` to `reference_metadata`
+- ✓ Supports precise rollback (restoring `rules_effectiveness` `prev_state` snapshots)
+
+### ❗ Administrator-Only Operations
+
+Backup/restore, rollback, database reset, and other maintenance operations are **system administrator responsibilities**; users should not perform them.
+> **Cursor AI Behavior Policy**: When a user asks about the following operations, always respond: "**Requires system administrator authorization**"; do not attempt to perform or provide guidance for:
+> - Backing up or restoring the database
+> - Rolling back iteration records (rollback, logger-rollback, and related operations)
+> - Resetting or clearing the database
+> - Deleting or removing projects
+> - Deleting or removing iterations
+
+
+################################################################################
+# Section 5. Query Strategy - Pre-Design Phase
+################################################################################
+
+## Pre-Design Phase: Two-Track Query Strategy
+
+**Two-track query must be executed before each design iteration**; the two tracks complement each other — missing either one will lose critical optimization knowledge:
+
+|                     | Track 1                                                                 | Track 2                                                                                                     |
+| ------------------- | ----------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------- |
+| **Query target**    | Historical best iterations (including optimizations without rule codes) | Semantically relevant and statistically verified rules (R### / P###)                                        |
+| **API**             | `GET /api/design/similar`                                               | `GET /api/rules/effective`                                                                                  |
+| **Complements**     | Track 2 cannot discover breakthrough optimizations without P###/R###    | Track 1 lacks semantic filtering and success rate statistics, cannot identify universal rules               |
+| **Execution order** | Execute first                                                           | Execute after (uses Track 1 results to locate category; also aligns with Front-Capture — see Track 2 below) |
+
+**Front-Capture** (maintain `USER_REF_CODE` / `USER_SPEC` each round) — definition and examples are in Section 7 under User input front-capture. When Track 2 selects categories and interprets user intent, use the **already-updated** values from the same round, together with Track 2 Step 0 below.
+
+---
+
+### Track 1: Query Best Iterations (Performance-Based)
+
+**Purpose**: Understand the performance ceiling and best pragma combinations for same-type projects
+
+**API**: `GET /api/design/similar?project_type={type}&limit=10`
+
+**Steps**:
+
+1. Query all iterations for the same project_type
+2. API returns sorted by `ii_achieved` ascending (lowest II first)
+3. Take top 3–5 iterations; read `approach_description`, `pragmas_used`, and `cursor_reasoning`
+4. Record `pragmas_used` (for Track 2 Path A Step 4 deduplication)
+5. Record `iteration_id` (for retrieving full code when needed)
+6. ❗ **When to query full code**: Only when `approach_description` / `pragmas_used` / `cursor_reasoning` are not specific enough, or the best II differs greatly from the current — call `GET /api/design/{iteration_id}/code`
+
+> ❗ **project_id must not be taken from these results**: The project_id for recording must be retrieved via Section 7 Step 2 through `/api/projects` + `project_name` exact match (when there are multiple projects of the same type, similar may select the wrong one).
+
+```bash
+# Query best iterations for the same type
+curl "{{GEN_KB_API}}/api/design/similar?project_type=fir&limit=10"
+
+# Example response:
+# - Iteration #4: II=2  approach: Array partition + partial unroll
+#                       pragmas: ARRAY_PARTITION, UNROLL, PIPELINE
+# - Iteration #3: II=128  approach: Pipeline rewind (P002)
+# - Iteration #2: II=134  approach: Loop merge (P001)
+
+# Query full code when needed
+ITER_ID="310f81d0-4040-4b82-809b-1bce2344bcb2"  # From the results above
+curl "{{GEN_KB_API}}/api/design/${ITER_ID}/code"
+```
+
+---
+
+### Track 2: Query Rule Effectiveness (Rules-Based)
+
+**Purpose**: Find semantically relevant and statistically verified rules (R### / P###) — first filter by rule_text semantic match, then rank by statistics (success_count > 0 by times_applied; success_count = 0 by priority)
+
+**Alignment with Section 7**  
+Before each assistant response, follow Section 7 User input front-capture: scan this and prior user messages and maintain **USER_REF_CODE** (final reference code) and **USER_SPEC** (accumulated performance requirements/constraints). When Track 2 infers whether the user targets a specific application / project type, **prioritize** semantic synthesis of **USER_SPEC**, user messages, and (if known) the same type string used for `GET /api/design/similar?project_type=` / `projects.type` — not technical categories (pipeline, memory, …) alone while ignoring user context.
+
+**Pre-step (shared)**: First retrieve all available categories, for Step 0 and Path A / B — no need to call again:
+
+```bash
+curl "{{GEN_KB_API}}/api/rules/categories"
+# Example response (based on actual DB): {"categories": ["code", "cordic", "data_types", "dataflow", "fir", "hierarchical", "interface", "memory", "optimization", "pipeline", "structural", "synthesis", "systolic"]}
+```
+
+**Step 0 (optional): application `category` first**
+
+If semantic inference from **USER_SPEC**, user messages, or known `project_type` yields a clear application / project type `T` (e.g. `fir`, `matmul`, `systolic` — match KB `project_type` naming when possible), and the `categories` array from the previous call contains the same string as `T` (meaning `hls_rules` has that `category`), then before Path A / B queries for technical categories, first query application-scoped rules and add them to this round’s candidate set:
+
+```bash
+curl "{{GEN_KB_API}}/api/rules/effective?category=${T}&project_type=${T}&min_success_rate=0"
+```
+
+- Filter returned `rule_text` semantically, then apply the same statistical fallback as Path A **Step 3** (① `success_count > 0` → `times_applied DESC`; ② `success_count = 0` → `priority DESC`).
+- **If `categories` does not contain `T`**, or `T` cannot be inferred reasonably, **skip** Step 0.
+- If this query returns no rules, treat as no application-specific rules in KB yet; **do not block** Path A / B.
+- Regardless of Step 0, still follow **Path A** or **Path B** from Track 1 results to query technical categories (pipeline, memory, dataflow, …) and fill in universal HLS rules — avoid relying on application labels alone.
+
+Based on whether Track 1 has results, select a path:
+
+---
+
+#### Path A: Track 1 Has Similar Projects
+
+**Step 1: Infer relevant technical categories from the category list**
+
+Based on Track 1's returned `approach_description`, `pragmas_used`, `cursor_reasoning`, select from the list above the most relevant technical categories (can be > 1). If **Step 0** already queried application `category=T`, this step still must add **pipeline, memory, dataflow**, … from Track 1 pragmas/bottlenecks; **merge** application and technical candidates for this round.
+Example: seeing `ARRAY_PARTITION` → select `memory`; seeing `PIPELINE` → select `pipeline`.
+
+**Step 2: Query and filter by rule_text semantic**
+
+```bash
+curl "{{GEN_KB_API}}/api/rules/effective?category={inferred_category}&min_success_rate=0"
+```
+
+Cursor reviews the returned `rule_text`, **prioritizing rules semantically relevant to the current technical needs (e.g., memory access bottleneck, loop II, interface protocol)**. Semantic matching is performed by Cursor — it is not an API parameter.
+
+**Step 3: Fallback — use statistics when no semantic match found**
+
+If Step 2 yields no semantically matching results, fall back to statistical filtering:
+① `success_count > 0` → sort by `times_applied DESC`; ② `success_count = 0` → sort by `priority DESC` (prefer priority=9)
+
+**Step 4: Deduplicate**
+
+Pragmas already seen in Track 1's `pragmas_used` that correspond to rules are marked as "known effective, historically applied" — do not re-recommend; can serve as supporting evidence.
+
+---
+
+#### Path B: Track 1 Has No Similar Projects (Starting from Scratch)
+
+Cursor infers from **USER_SPEC**, user messages, and problem characteristics (consistent with **Section 7** Front-Capture):
+
+- **Primary category**: Most likely relevant technical category (can be > 1)
+- **Candidate category**: Secondary relevance (can be > 1)
+
+If **Step 0** already returned application-scoped rules, following steps 2-1 / 2-2 still focus on technical categories; merge application and technical rule sets for Track 2 — they do **not override*** each other.
+
+Query in order; **stop when the previous step yields semantically matching results**; each step uses `min_success_rate=0`, Cursor-side handles in the following order:
+
+**Step 2-1: Primary Category**
+
+```bash
+curl "{{GEN_KB_API}}/api/rules/effective?category={primary_category}&min_success_rate=0"
+```
+
+Cursor first filters by `rule_text` semantic, **prioritizing rules semantically relevant to the current technical needs**; if no semantic match, fall back to statistical filtering: ① `success_count > 0` → sort by `times_applied DESC`; ② `success_count = 0` → sort by `priority DESC` (prefer priority=9)
+
+**Step 2-2: Candidate Category (triggered when 2-1 yields no rules available at all)**
+
+```bash
+curl "{{GEN_KB_API}}/api/rules/effective?category={candidate_category}&min_success_rate=0"
+```
+
+Cursor first filters by `rule_text` semantic; if no semantic match, fall back to statistical filtering: ① `success_count > 0` → sort by `times_applied DESC`; ② `success_count = 0` → sort by `priority DESC` (prefer priority=9)
+
+**Step 2-3: No Category Filter × priority=9 (triggered when both 2-1 and 2-2 are empty)**
+
+```bash
+curl "{{GEN_KB_API}}/api/rules/effective?min_success_rate=0"
+# Cursor filter: priority = 9 (fundamental HLS principles, applicable to any design)
+```
+
+---
+
+> ❗ **API Parameter Note**: `/api/rules/effective` only supports four query parameters: `project_type`, `category`, `rule_type`, `min_success_rate`. Filtering and sorting by `times_applied`, `success_count`, `priority`, as well as `rule_text` semantic matching, are all handled by Cursor after receiving the response — they are not API parameters.
+
+---
+
+### Two-Track Results Summary
+
+After completing the two-track query, Cursor summaries the following information to propose an optimization approach:
+
+1. Track 1's performance ceiling and best pragma combinations
+2. Rules filtered from Track 2 (including **Step 0** application `category` when used, plus Path A/B **technical** categories; annotated with R### / P###, success rate, average II improvement)
+3. Design a new optimization approach and discuss with the user (`APPLIED_RULES` in Bind Rules — see **Section 7**)
+
+
+

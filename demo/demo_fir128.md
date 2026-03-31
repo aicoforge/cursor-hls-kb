@@ -2,7 +2,7 @@
 
 > **Project**: `FIR128_Demo` | **Tool**: Vitis HLS 2023.2 | **Target**: xc7z020clg400-1
 > 
-> This demo shows how a single Cursor prompt drives Vitis HLS through **3 progressive iterations**, with the KB automatically suggesting and recording rules at every step. User-defined rules (P###) are highlighted to show their real impact on design decisions.
+> This demo shows how a single Cursor prompt drives Vitis HLS through **3 progressive iterations**, with the KB and recording rules at every step. User-defined rules (P###) are highlighted to show their real impact on design decisions.
 
 ---
 

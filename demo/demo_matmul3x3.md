@@ -31,8 +31,7 @@ Cursor AI Agent  ──── SSH ────►  Vitis HLS Host
 ```
 Design a Matrix Multiplier using FIFO, follow the KB rules
 Matrix size: A 3×3, B 3×3, Result 3×3
-Requirements: read one sample per clock cycle using a FIFO interface,
-              while minimizing the area
+Requirements: read one sample per clock cycle using a FIFO interface, while minimizing the area
 ```
 
 ---
@@ -105,7 +104,7 @@ Initial synthesis at 10 ns had **timing violation (slack −0.37 ns)**. Clock re
 ### User Prompt
 
 ```
-Save this to KB Matmul project iter2 (optimize latency further in the row-stationary direction)
+Optimize latency further in the row-stationary direction, save this to KB Matmul project iter2
 ```
 
 After exploring a DATAFLOW row-stationary approach (which gave 72 cycles but added handshake overhead), Cursor converged on a simpler and faster architecture.

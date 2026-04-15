@@ -119,7 +119,12 @@ APPLIED_RULES (mixed container maintained during Bind Rules phase)
 
 ---
 
-### previous_ii Baseline Definition
+## previous_ii Baseline Definition
+
+> **Term forward-reference**: This section uses the **Layer A / Layer B** distinction.
+> Full definition is in 「II Metric Priority (`ii_bneck` vs `ii_top`)」 below.
+> In short: **Layer A** = `rules_applied.success` driven by **`ii_bneck`** only (this section's scope);
+> **Layer B** = `ii_top` / latency narrative (`cursor_reasoning` / local docs only, never sets `success`).
 
 > `current_ii` = this iteration's **`ii_bneck`** from the csynth report (**same numeric value** as `synthesis_result.ii_achieved`).
 >
@@ -207,7 +212,7 @@ Three required elements: **estimated value**, **derivation basis**, **layer used
 success = (current_ii < previous_ii)   // both values = ii_bneck
 ```
 
-This formula applies identically regardless of whether `previous_ii` is measured (Layer 1) or estimated (Layer 2). **Do not** set `success` from **`ii_top`** or **latency** alone — see 「II Metric Priority (`ii_bneck` vs `ii_top`)」 above.
+This formula applies identically regardless of whether `previous_ii` is measured (Layer 1) or estimated (Layer 2). **Do not** set `success` from **`ii_top`** or **latency** alone — see 「II Metric Priority (`ii_bneck` vs `ii_top`)」 below.
 
 The API independently recalculates `api_success = rule_app.success AND (previous_ii > current_ii)`, so Cursor's `success` value and the API's recalculation will agree as long as **`previous_ii` / `current_ii` are both `ii_bneck`**.
 
@@ -299,20 +304,7 @@ Nested pipeline (pipeline within pipeline) — exception to the max rule above
     the outer pipeline, not the outer stage's initiation interval used for scheduling.
 ```
 
-**Supplement — no pipelined loop row:**
-
-```
-All loop rows Pipelined=no, or no `o` loop rows in the report
-  → ii_bneck = ii_top (use top-level `+` function row Interval as fallback)
-  → In cursor_reasoning note: "ii_bneck fallback to ii_top: no pipelined loop row found"
-  → ii_bneck and ii_top are numerically equal; Layer A vs Layer B distinction does not apply
-```
-
-**Map to API**: `synthesis_result.ii_achieved` ← **`ii_bneck`** (same numeric rule as above).
-
-> ❗ Getting this rule wrong directly affects `ii_improvement` statistics.
-
-### II Metric Priority (`ii_bneck` vs `ii_top`) for `rules_applied` and documentation
+#### II Metric Priority (`ii_bneck` vs `ii_top`) for `rules_applied` and documentation
 
 **Definitions (from `csynth.rpt` Performance & Resource Estimates):**
 
@@ -336,6 +328,24 @@ All loop rows Pipelined=no, or no `o` loop rows in the report
 **Why:** Track 2 **success_rate** is meant to reflect **loop II / pipeline rule** outcomes. Mixing **top-level Interval** into the same **`success` bit** blurs **pipeline pragmas** with **structural / algorithmic** wins.
 
 **Project-type note:** **FIR / simple loop** designs often hit **`ii_bneck`=1** early; **CORDIC / systolic / FFT** may iterate many rounds with **`ii_bneck` > 1** — Layer A stays meaningful longer.
+
+**Supplement — no pipelined loop row:**
+
+```
+All loop rows Pipelined=no, or no `o` loop rows in the report
+  Tier 1 → ii_bneck = ii_top
+  Tier 2 → if ii_top is `-`: ii_bneck = latency_cycles + 1
+           (non-pipelined top: next invocation waits for current to finish)
+  Tier 3 → if latency_cycles is also `-` (rare; treat as report anomaly):
+           skip complete_iteration this round, inspect csynth log
+  → cursor_reasoning: note which tier, e.g. "ii_bneck fallback Tier 2: top Interval `-`"
+  → Tier 1: ii_bneck == ii_top, Layer A/B distinction N/A
+    Tier 2: record ii_top as `null`; ii_bneck carries latency+1
+```
+
+**Map to API**: `synthesis_result.ii_achieved` ← **`ii_bneck`** (same numeric rule as above).
+
+> ❗ Getting this rule wrong directly affects `ii_improvement` statistics.
 
 **B. `{top_function}_csynth.rpt`** — locate the **Timing Summary** section (heading contains `Timing` and `Summary`).
 

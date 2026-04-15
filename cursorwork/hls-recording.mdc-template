@@ -192,14 +192,14 @@ Three required elements: **estimated value**, **derivation basis**, **layer used
 
 | Field | Type | When | Description |
 |-------|------|------|-------------|
-| `ii_top` | int | Every iteration | Top-level function Interval from this csynth report |
+| `ii_top` | int \| `null` | Every iteration | Top-level function Interval from this csynth report; `null` when report shows `-` (Vitis HLS reports unbounded when top-level latency cannot be statically determined, e.g. streaming interface) |
 | `ii_top_previous` | int \| `null` | Every iteration | Previous iteration's `ii_top`; `null` on first iteration |
 | `previous_ii_source` | `"measured"` / `"estimated"` / `"fallback"` | First iteration (Layer 2) only | Which layer was used for `previous_ii` |
 | `previous_ii_basis` | Free text | First iteration (Layer 2) only | Derivation basis + layer identifier |
 
 > `ii_top` / `ii_top_previous`: **every iteration** (structured Layer B backup; `latency_cycles` cannot replace `ii_top` in DATAFLOW / systolic / FFT designs where `ii_top ≠ latency + 1`).
 > `previous_ii_source` / `previous_ii_basis`: **only** first iteration Layer 2. Non-first iterations **omit** these (Layer 1 = measured, self-evident).
-> When `USER_REF_CODE` and `USER_SPEC` are both absent, still provide at least `{"ii_top":..., "ii_top_previous":...}` (not null); Layer 2 additionally requires `previous_ii_source` + `previous_ii_basis`.
+> When `USER_REF_CODE` and `USER_SPEC` are both absent, still provide at least `{"ii_top":..., "ii_top_previous":...}` (`ii_top` may be `null` if Vitis HLS reports `-` for an unbounded top-level); Layer 2 additionally requires `previous_ii_source` + `previous_ii_basis`.
 
 **success determination** (`rules_applied` — **Layer A / `ii_bneck` only**):
 

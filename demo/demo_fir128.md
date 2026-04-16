@@ -29,9 +29,8 @@ Cursor AI Agent  ──── SSH ────►  Vitis HLS Host
 ## User Prompt (Iteration 1)
 
 ```
-Design a 128-tap FIR filter with AXI Streaming interface using a streaming
-loop architecture, with minimal resource usage. Name the project FIR128_Demo,
-follow the KB rules.
+Design a 128-tap FIR filter with AXI Streaming interface using a streaming loop architecture,
+with minimal resource usage. Name the project FIR128_Demo, follow the KB rules.
 ```
 
 ---
@@ -96,9 +95,8 @@ Two nested loops in a single `ap_ctrl_hs` function:
 ## User Prompt (Iteration 2)
 
 ```
-Re-design for iter2: outer streaming loop (no NUM_SAMPLES, no fixed packet
-length). Process one sample per outer loop iteration with an inner pipelined
-MAC loop.
+Re-design for iter2: outer streaming loop (no NUM_SAMPLES, no fixed packet length).
+Process one sample per outer loop iteration with an inner pipelined MAC loop.
 ```
 
 ---

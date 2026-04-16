@@ -265,6 +265,8 @@ When promoting these three unnumbered entries into `hls_rules`, **category choic
 
 Each of the three rules describes a **cross-cutting HLS methodology** concern (II vs banking, HLS estimate vs backend closure, clock-only tuning), so **technical categories** (`optimization`, `synthesis`) fit more naturally than any single-purpose label — a rule filed in a technical category is discoverable by any future design that hits the same class of decision.
 
+> **Also worth adding as `dft`** — the KB already has application categories (`fir`, `systolic`, `cordic`, …) and Track 2 Step 0 queries them first (`category=${project_type}`) when a matching application is inferred. Adding **`dft`** alongside the technical category means a future DFT project's Step 0 retrieves these three rules directly, while the technical-category query path (`optimization` / `synthesis`) keeps them discoverable for non-DFT designs facing the same trade-offs. The two are merged and do not override each other.
+
 ### Guidance for your own unnumbered rules
 
 1. **Write during the iteration, not after.** If the decision was non-trivial but no `P###`/`R###` matches, add an unnumbered bullet to the file header Applied Rules immediately.

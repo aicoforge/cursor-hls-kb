@@ -222,6 +222,8 @@ This is the part worth studying if you plan to **contribute your own P-rules to 
 - **`synthesis`** — rule is about DSP binding, resource/timing constraints. *(Fourth candidate; could also sit in `pipeline` if you emphasize II.)*
 - **`pipeline`** — reserve for pure II / PIPELINE / dependence constraints that don't fit cleanly elsewhere.
 
+> **Also worth adding as `fft`** — the KB already has application categories (`fir`, `systolic`, `cordic`, …) and Track 2 Step 0 queries them first (`category=${project_type}`) when a matching application is inferred. Adding **`fft`** alongside each technical category means a future FFT project's Step 0 retrieves these four rules directly, while the technical-category query path keeps them discoverable for any non-FFT design facing the same class of issue (dual-write, ping-pong, bank selection, DSP/MAC split). The two are merged and do not override each other.
+
 ### How these were recorded (important mechanics)
 
 Only rules **with a `rule_code`** go into the API's `rules_applied` array when calling `complete_iteration`. Unnumbered proposals live in **the file header comment** of `fft.cpp` as bullets under `Applied Rules`, in the same format as numbered rules but without the code:

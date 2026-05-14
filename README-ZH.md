@@ -1,6 +1,7 @@
 # HLS Knowledge Base — 系統管理與使用指南
 
-[![License CC BYNC 40](https://img.shields.io/badge/License-CC%20BY--NC%204.0-lightgrey.svg)](https://creativecommons.org/licenses/by-nc/4.0/) [![For Education](https://img.shields.io/badge/Use-Education%20%26%20Academic-green.svg)](https://creativecommons.org/licenses/by-nc/4.0/)
+[![License: CC BY-NC 4.0](https://img.shields.io/badge/License-CC%20BY--NC%204.0-lightgrey.svg)](https://creativecommons.org/licenses/by-nc/4.0/)
+[![For Education](https://img.shields.io/badge/Use-Education%20%26%20Academic-green.svg)](https://creativecommons.org/licenses/by-nc/4.0/)
 
 > Copyright (c) 2026 AICOFORGE. Licensed under [CC BY-NC 4.0](https://creativecommons.org/licenses/by-nc/4.0/).
 > Educational and academic use is freely permitted with attribution. AMD/Xilinx authorized partners may use this for course integration.
@@ -40,7 +41,7 @@
 ## 系統架構
 
 <p align="center">
- <img src="https://github.com/user-attachments/assets/a935fdda-f26c-41cb-a25e-06a191928c2f" width="70%">
+  <img src="https://github.com/user-attachments/assets/a935fdda-f26c-41cb-a25e-06a191928c2f" width="70%">
 </p>
 
 **存取方式**：
@@ -54,20 +55,20 @@
 
 ### 實體表（5 張）
 
-| 表名  | 用途  |
-| --- | --- |
-| `hls_rules` | 規則定義（R### 官方規則 / P### 用戶自定義） |
-| `projects` | 專案基本資訊 |
-| `design_iterations` | 每次設計迭代的相關資訊 |
-| `synthesis_results` | HLS 合成結果（II、延遲、資源） |
-| `rules_effectiveness` | 規則應用效果追蹤統計 |
+| 表名                    | 用途                           |
+| --------------------- | ---------------------------- |
+| `hls_rules`           | 規則定義（R### 官方規則 / P### 用戶自定義） |
+| `projects`            | 專案基本資訊                       |
+| `design_iterations`   | 每次設計迭代的相關資訊                  |
+| `synthesis_results`   | HLS 合成結果（II、延遲、資源）           |
+| `rules_effectiveness` | 規則應用效果追蹤統計                   |
 
 ### 視圖（2 個）
 
-| 視圖名 | 用途  |
-| --- | --- |
-| `rule_effectiveness_summary` | 規則成功率彙總（動態計算） |
-| `best_designs_by_type` | 每個 project_type 中 ii_achieved 最小的設計記錄，供快速查詢各類型最佳設計基準 |
+| 視圖名                          | 用途                                                   |
+| ---------------------------- | ---------------------------------------------------- |
+| `rule_effectiveness_summary` | 規則成功率彙總（動態計算）                                        |
+| `best_designs_by_type`       | 每個 project_type 中 ii_achieved 最小的設計記錄，供快速查詢各類型最佳設計基準 |
 
 ---
 
@@ -75,11 +76,11 @@
 
 範例環境包含 3 台位於相同內網的機器，透過外網 IP `hls-external-ip` 使用不同 port forwarding 可各別連接到這 3 台機器。系統管理員需要先完成 HLS01 知識庫主機的安裝與初始化（含 PostgreSQL、FastAPI 部署及規則匯入），使用者的 Vitis-HLS 主機運作 Cursor 自動化 HLS 設計時才可以由知識庫取得資料。
 
-| 機器  | 角色  | 內網 IP（範例） | 外網 Port Forwarding（範例） | 說明  |
-| --- | --- | --- | --- | --- |
-| **HLS01** | 知識庫主機 | 192.168.1.11 | hls-external-ip:1100 | 管理員安裝設置， PostgreSQL + FastAPI |
-| **HLS02** | Vitis-HLS主機 | 192.168.1.12 | hls-external-ip:1200 | 使用者透過Cursor 代理 Vitis-HLS 設計 |
-| **HLS03** | Vitis-HLS主機 | 192.168.1.13 | hls-external-ip:1300 | 使用者透過Cursor 代理 Vitis-HLS 設計 |
+| 機器        | 角色          | 內網 IP（範例）    | 外網 Port Forwarding（範例） | 說明                            |
+| --------- | ----------- | ------------ | ---------------------- | ----------------------------- |
+| **HLS01** | 知識庫主機       | 192.168.1.11 | hls-external-ip:1100   | 管理員安裝設置， PostgreSQL + FastAPI |
+| **HLS02** | Vitis-HLS主機 | 192.168.1.12 | hls-external-ip:1200   | 使用者透過Cursor 代理 Vitis-HLS 設計   |
+| **HLS03** | Vitis-HLS主機 | 192.168.1.13 | hls-external-ip:1300   | 使用者透過Cursor 代理 Vitis-HLS 設計   |
 
 > 實際連線配置可依環境不同而調整，上述網路配置僅供參考。
 
@@ -163,7 +164,7 @@ DB_PORT=5432
 
 > **注意：`DB_USER` 不可設為 `user`**，`user` 為 PostgreSQL 保留關鍵字（SQL standard reserved word），直接用於 `CREATE USER user ...` 會導致語法錯誤，使該帳號建立失敗。
 
-完成 `setup.sh` 後輸出如下：
+ 完成 `setup.sh` 後輸出如下：
 
 ```
 ===========================================================
@@ -313,7 +314,7 @@ python3 reset_database.py
 
 **rollback：** 讀取日誌，在單一交易中還原規則統計、刪除合成結果與迭代記錄。任一步驟失敗，資料庫回到執行前的狀態，支援 `--dry-run` 預覽。
 
-`_rollback_info` 由 `complete_iteration` 寫入時自動附帶，可以精確還原 `rules_effectiveness` 統計值，並刪除 `synthesis_results` 與 `design_iterations`；若迭代缺少 `_rollback_info` 則只能直接刪除後兩者。`logger-rollback.py` 僅限系統管理員在 KB 主機（HLS01）上執行。
+`_rollback_info` 由 `complete_iteration` 寫入時自動附帶，可以精確還原 `rules_effectiveness` 統計值，並刪除 `synthesis_results` 與 `design_iterations`；若迭代缺少 `_rollback_info`  則只能直接刪除後兩者。`logger-rollback.py` 僅限系統管理員在 KB 主機（HLS01）上執行。
 
 ### 生成回滾日誌
 
@@ -335,9 +336,9 @@ python3 logger-rollback.py logger --project FIR_Demo --iteration 3
 
 重點說明：
 
-- `With _rollback_info: 1 | Without: 0` — 所有迭代均具備精確還原元資料，可還原規則統計值；若為 0 則只能刪除記錄，無法還原統計
-- `Total rules_effectiveness operations: 3` — 回滾時將對 `rules_effectiveness` 執行 3 筆操作
-- 此時尚未異動資料庫，日誌僅供下一階段 `rollback` 指令讀取
+* `With _rollback_info: 1 | Without: 0` — 所有迭代均具備精確還原元資料，可還原規則統計值；若為 0 則只能刪除記錄，無法還原統計
+* `Total rules_effectiveness operations: 3` — 回滾時將對 `rules_effectiveness` 執行 3 筆操作
+* 此時尚未異動資料庫，日誌僅供下一階段 `rollback` 指令讀取
 
 ### 執行回滾
 
@@ -380,11 +381,11 @@ Proceed with rollback? [y/N]: Y
 
 重點說明：
 
-- `[✓ precise]` — 具備 `_rollback_info`，規則統計可精確還原（而非只刪除）
-- `rules_effectiveness: 3 UPDATE(restore) + 0 DELETE(new)` — 表示 3 條規則在 iter#3 之前已有歷史記錄需還原，沒有因為 iter#3 而首次被套用的新規則
-- `RESTORED rules_effectiveness 333574eb... (applied=1, success=1)` — 移除 iter#3 後，規則 `333574eb` 的套用次數還原為 1、成功次數還原為 1
-- `[!] Project 10547eba... kept` — FIR_Demo 仍有 2 筆其他迭代，保留專案；若無剩餘迭代則改為 `DELETED project`
-- `Log file updated` — YAML 日誌追加寫入 `rollback_status: completed`，作為操作留存記錄
+* `[✓ precise]` — 具備 `_rollback_info`，規則統計可精確還原（而非只刪除）
+* `rules_effectiveness: 3 UPDATE(restore) + 0 DELETE(new)` — 表示 3 條規則在 iter#3 之前已有歷史記錄需還原，沒有因為 iter#3 而首次被套用的新規則
+* `RESTORED rules_effectiveness 333574eb... (applied=1, success=1)` — 移除 iter#3 後，規則 `333574eb` 的套用次數還原為 1、成功次數還原為 1
+* `[!] Project 10547eba... kept` — FIR_Demo 仍有 2 筆其他迭代，保留專案；若無剩餘迭代則改為 `DELETED project`
+* `Log file updated` — YAML 日誌追加寫入 `rollback_status: completed`，作為操作留存記錄
 
 ---
 
@@ -655,12 +656,12 @@ curl "http://localhost:8000/api/rules/effective?min_success_rate=0"
 
 規則匯入時依規則文字的關鍵字自動設定 priority：
 
-| Priority | 觸發關鍵字 | 語意  |
-| --- | --- | --- |
-| 9   | `always`, `must`, `critical`, `never` | 強制性、不可違反 |
-| 7   | `do not`, `avoid`, `ensure`, `should` | 強烈建議、應避免 |
-| 5   | `consider`, `may`, `recommend`, `prefer` | 建議性、可選擇 |
-| 4   | （無符合關鍵字） | 預設值，一般性規則 |
+| Priority | 觸發關鍵字                                    | 語意        |
+| -------- | ---------------------------------------- | --------- |
+| 9        | `always`, `must`, `critical`, `never`    | 強制性、不可違反  |
+| 7        | `do not`, `avoid`, `ensure`, `should`    | 強烈建議、應避免  |
+| 5        | `consider`, `may`, `recommend`, `prefer` | 建議性、可選擇   |
+| 4        | （無符合關鍵字）                                 | 預設值，一般性規則 |
 
 兩軌結果綜合後，Cursor AI 提出優化方案並於設計中精確引用規則編號（R### / P###），在`complete_iteration`階段會自動將本次應用的規則回寫至 `rules_effectiveness` 更新成功率統計。
 
@@ -680,14 +681,14 @@ curl "http://localhost:8000/api/rules/effective?min_success_rate=0"
 
 `rules_user_defined.txt` 為使用者自定義規則檔案，可包含技術面向 category 如 `pipeline`、`memory`，也可包含應用相關 category 如 `fir`、`systolic`、`cordic`。以實際分類為例：
 
-| Category | 說明  | 範例規則 |
-| --- | --- | --- |
-| `pipeline` | 流水線化與 II 優化 | P011 `PIPELINE II=1 rewind`、P018 禁止 innermost loop 純量累加 |
-| `memory` | 陣列存取與分割 | P033 禁止 hot loop 中存取 off-chip、P037 對展開的 lane 個別分割陣列 |
-| `fir` | FIR 濾波器應用優化 | P068 合併移位與計算迴圈消除依賴、P069 加 `rewind` 使相鄰迭代無縫重疊 |
+| Category   | 說明                | 範例規則                                                       |
+| ---------- | ----------------- | ---------------------------------------------------------- |
+| `pipeline` | 流水線化與 II 優化       | P011 `PIPELINE II=1 rewind`、P018 禁止 innermost loop 純量累加    |
+| `memory`   | 陣列存取與分割           | P033 禁止 hot loop 中存取 off-chip、P037 對展開的 lane 個別分割陣列        |
+| `fir`      | FIR 濾波器應用優化       | P068 合併移位與計算迴圈消除依賴、P069 加 `rewind` 使相鄰迭代無縫重疊               |
 | `systolic` | Systolic array 架構 | P083 以 next-state 陣列消除 RAW hazard、P086 輸入時序 skew 對齊各 PE 資料 |
 
-`pipeline`、`memory` 等技術 category 在 `rules_ug1399.txt`與`rules_user_defined.txt` 都有。 `fir` 與 `systolic` 是應用層 category，僅在 `rules_user_defined.txt`，API 查詢時自動合併回傳不分 official / user_defined。
+`pipeline`、`memory` 等技術 category 在 `rules_ug1399.txt`與`rules_user_defined.txt` 都有。  `fir` 與 `systolic` 是應用層 category，僅在 `rules_user_defined.txt`，API 查詢時自動合併回傳不分 official / user_defined。
 
 在 Track 2 步驟 0，Cursor 根據使用者輸入推論 category，再呼叫 `/api/rules/effective?category=<名稱>` 精準取得對題規則：
 
@@ -725,19 +726,19 @@ curl "http://localhost:8000/api/rules/effective?rule_type=user_defined&min_succe
 
 > ❗ **header comment 寫入時機**：Cursor 寫代碼時 .cpp **不含** file header comment，只寫代碼本體與每個 `#pragma HLS` 上方的三行 pragma comment。csim + csynth 都成功後，解析報告取得實測數據，再將完整 header comment 一次插入 .cpp 最頂端（所有 `#include` 之前），然後才組裝 code_snapshot 寫入 KB。header 中所有數值（Synthesis Result、Resources、每個 Optimization 的 Result）均為實測值。
 
-| 步驟  | 操作  |
-| --- | --- |
-| Step 1 | Front-Capture：掃描用戶訊息，維護 USER_REF_CODE / USER_SPEC |
-| Step 2 | 雙軌查詢：以 `/api/design/similar` 查詢相似設計（Track 1），以 `/api/rules/effective` 取得規則（Track 2） |
-| Step 3 | Bind Rules：綁定選定規則至 APPLIED_RULES；推理脈絡記入 `cursor_reasoning` |
-| Step 4 | 提出優化方案（根據 KB 知識與用戶輸入） |
-| Step 5 | 寫代碼 + pragma comment（每個 `#pragma HLS` 上方三行說明；**此時不寫 file header comment**） |
-| Step 6 | 執行 csim + csynth（任一失敗 → 停止，不記錄） |
-| Step 7 | 解析 csynth 報告（II、Latency、Resources、Timing），一次填入完整 header comment（實測值） |
-| Step 8 | 用 `/api/projects` + `project_name` 精確比對取得 `project_id`（**關鍵**，避免重複建立專案） |
-| Step 9 | 呼叫 `POST /api/design/complete_iteration` |
-| Step 10 | 建立 / 更新本地 markdown 文檔備份 |
-| Step 11 | 若 II 未達標，以本次結果為基礎更新 `previous_ii`，從尚未嘗試的 pragma 組合選取最佳方案，回到 Step 2 重新迭代 |
+| 步驟      | 操作                                                                                  |
+| ------- | ----------------------------------------------------------------------------------- |
+| Step 1  | Front-Capture：掃描用戶訊息，維護 USER_REF_CODE / USER_SPEC                                   |
+| Step 2  | 雙軌查詢：以 `/api/design/similar` 查詢相似設計（Track 1），以 `/api/rules/effective` 取得規則（Track 2） |
+| Step 3  | Bind Rules：綁定選定規則至 APPLIED_RULES；推理脈絡記入 `cursor_reasoning`                          |
+| Step 4  | 提出優化方案（根據 KB 知識與用戶輸入）                                                               |
+| Step 5  | 寫代碼 + pragma comment（每個 `#pragma HLS` 上方三行說明；**此時不寫 file header comment**）          |
+| Step 6  | 執行 csim + csynth（任一失敗 → 停止，不記錄）                                                     |
+| Step 7  | 解析 csynth 報告（II、Latency、Resources、Timing），一次填入完整 header comment（實測值）                |
+| Step 8  | 用 `/api/projects` + `project_name` 精確比對取得 `project_id`（**關鍵**，避免重複建立專案）             |
+| Step 9  | 呼叫 `POST /api/design/complete_iteration`                                            |
+| Step 10 | 建立 / 更新本地 markdown 文檔備份                                                             |
+| Step 11 | 若 II 未達標，以本次結果為基礎更新 `previous_ii`，從尚未嘗試的 pragma 組合選取最佳方案，回到 Step 2 重新迭代             |
 
 > **Step 7 Applied Rules 記錄規則**：凡 Cursor 推論優化方向時有參考或應用的規則，無論能否確認 rule_code，都必須記錄在 `code_snapshot` header 的 Applied Rules 段落。有 rule_code 時寫 `P###/R###: rule_text`；無法確認 rule_code 時寫純 rule_text，不得省略。
 
@@ -789,13 +790,13 @@ vitis_hls -f run_hls.tcl   # 執行 csim_design + csynth_design
 
 知識庫由所有 Cursor HLS 使用者共用，`rules_effectiveness` 的成功率統計會影響每位使用者的規則推薦結果，因此採用以下存取原則：
 
-| 操作類型 | 執行者 | 說明  |
-| --- | --- | --- |
-| 查詢規則 / 設計 | Cursor HLS 使用者 | 隨時可查，不影響共用資料 |
-| 寫入新 iteration | Cursor HLS 使用者 | 僅透過 `complete_iteration` 自動完成 |
-| 更新規則統計 | `complete_iteration` 自動執行 | 由 API 內部在交易中更新，無獨立端點 |
-| Rollback（移除 Project 或 iteration） | 系統管理員 | 需系統管理權限 |
-| 知識庫備份 / 恢復 / 重置 | 系統管理員 | 需系統管理權限 |
+| 操作類型                             | 執行者                       | 說明                            |
+| -------------------------------- | ------------------------- | ----------------------------- |
+| 查詢規則 / 設計                        | Cursor HLS 使用者            | 隨時可查，不影響共用資料                  |
+| 寫入新 iteration                    | Cursor HLS 使用者            | 僅透過 `complete_iteration` 自動完成 |
+| 更新規則統計                           | `complete_iteration` 自動執行 | 由 API 內部在交易中更新，無獨立端點          |
+| Rollback（移除 Project 或 iteration） | 系統管理員                     | 需系統管理權限                       |
+| 知識庫備份 / 恢復 / 重置                  | 系統管理員                     | 需系統管理權限                       |
 
 **並發寫入安全**：多位使用者同時使用知識庫時，API 已內建防碰撞機制。若建立專案時發現同名專案已存在，API 回傳 **409 Conflict** 及 `existing_project_id`；Cursor 取出該 ID 重新呼叫 `complete_iteration`，不需要使用者介入。
 
@@ -803,19 +804,19 @@ vitis_hls -f run_hls.tcl   # 執行 csim_design + csynth_design
 
 Cursor AI 依設計階段自動呼叫對應端點——設計前以 `/api/design/similar` 查詢相似設計案例（學習最佳優化方法）、以 `/api/rules/categories` 取得 Category 清單、以 `/api/rules/effective` 取得規則（Cursor 端先以 `rule_text` 語意篩選對題規則，再按 success_count / times_applied / priority 排序）；合成後依自動記錄設計迭代先取得 `project_id`，再以 `/api/design/complete_iteration` 一次完成所有資料寫入（`iteration_number` 由 API 自動計算）；如需查看專案的迭代則呼叫 `/api/analytics/.../progress`。整個流程由 Cursor Agent 自動串接，使用者無需手動執行任何 API 呼叫。
 
-| 端點  | 方法  | 說明  |
-| --- | --- | --- |
-| `/health` | GET | 健康狀態檢查 |
-| `/api/projects` | GET | 列出所有專案（支援 type, limit, offset） |
-| `/api/projects` | POST | 建立新專案（並發寫入安全） |
-| `/api/projects/{project_id}` | GET | 取得單一專案詳情 |
-| `/api/design/similar` | GET | 查詢相似設計（學習用，含 cursor_reasoning；不含 code_snapshot / prompt_used / user_reference_code / reference_metadata） |
-| `/api/design/{iteration_id}/code` | GET | 取得特定迭代的完整詳細資訊（code_snapshot、cursor_reasoning、prompt_used、user_reference_code；**不含 reference_metadata**） |
-| `/api/rules/effective` | GET | 查詢規則（支援 rule_type 過濾，預設 min_success_rate=0.0） |
-| `/api/rules/categories` | GET | 回傳所有 Category 清單（供雙軌查詢 Category 推論使用） |
-| `/api/design/complete_iteration` | POST | 完整記錄一次迭代 |
-| `/api/analytics/project/{project_id}/progress` | GET | 傳回該專案所有的迭代結果 |
-| `/docs` | GET | Swagger UI 互動文檔 |
+| 端點                                             | 方法   | 說明                                                                                                       |
+| ---------------------------------------------- | ---- | -------------------------------------------------------------------------------------------------------- |
+| `/health`                                      | GET  | 健康狀態檢查                                                                                                   |
+| `/api/projects`                                | GET  | 列出所有專案（支援 type, limit, offset）                                                                           |
+| `/api/projects`                                | POST | 建立新專案（並發寫入安全）                                                                                            |
+| `/api/projects/{project_id}`                   | GET  | 取得單一專案詳情                                                                                                 |
+| `/api/design/similar`                          | GET  | 查詢相似設計（學習用，含 cursor_reasoning；不含 code_snapshot / prompt_used / user_reference_code / reference_metadata） |
+| `/api/design/{iteration_id}/code`              | GET  | 取得特定迭代的完整詳細資訊（code_snapshot、cursor_reasoning、prompt_used、user_reference_code；**不含 reference_metadata**）  |
+| `/api/rules/effective`                         | GET  | 查詢規則（支援 rule_type 過濾，預設 min_success_rate=0.0）                                                            |
+| `/api/rules/categories`                        | GET  | 回傳所有 Category 清單（供雙軌查詢 Category 推論使用）                                                                    |
+| `/api/design/complete_iteration`               | POST | 完整記錄一次迭代                                                                                                 |
+| `/api/analytics/project/{project_id}/progress` | GET  | 傳回該專案所有的迭代結果                                                                                             |
+| `/docs`                                        | GET  | Swagger UI 互動文檔                                                                                          |
 
 > 記錄迭代前必須透過設計迭代記錄與自動化 **Post-Synthesis** 取得 `project_id`，禁止從 `/api/design/similar` 結果取用——`similar` 按性能排序，排首的專案可能屬於其他人。
 
@@ -830,13 +831,12 @@ Cursor AI 依設計階段自動呼叫對應端點——設計前以 `/api/design
 情境：DBeaver 顯示連線逾時或拒絕連線。常見原因及排查順序：
 
 1. **SSH 隧道中斷**：長時間閒置或網路切換後隧道會自動斷開。在 Windows CMD 重新建立隧道：
-  
-  ```bash
-  ssh -L 5432:192.168.1.11:5432 cursor2hls@hls-external-ip -p 1200
-  ```
-  
+   
+   ```bash
+   ssh -L 5432:192.168.1.11:5432 cursor2hls@hls-external-ip -p 1200
+   ```
+
 2. **PostgreSQL 服務未啟動**：SSH 到知識庫主機後執行 `docker ps` 確認 PostgreSQL 容器狀態為 `Up`；若未啟動，在 `~/hls-kb/` 執行 `docker compose up -d`
-  
 
 **Cursor 回報權限不足或無法執行指令**
 
@@ -847,7 +847,7 @@ Cursor AI 依設計階段自動呼叫對應端點——設計前以 `/api/design
 
 ---
 
-**版本**: v1.0
+**版本**: v1.0 
 
 **最後更新**: 2026-03-28
 
@@ -862,4 +862,4 @@ Cursor AI 依設計階段自動呼叫對應端點——設計前以 `/api/design
 感謝在 HLS 設計方法論與研究議題方面給予的寶貴指導。
 
 **Eric Chang** 及 AMD Xilinx 團隊  
-感謝在 Vitis HLS 技術方面提供的專業建議與資源支援。<img width="1792" height="910" alt="hls_rules-table" src="https://github.com/user-attachments/assets/46d10865-b3b2-4a0e-a616-41baba6114c7" />
+感謝在 Vitis HLS 技術方面提供的專業建議與資源支援。

@@ -1,6 +1,7 @@
 # HLS Knowledge Base — System Administration & User Guide
 
-[![License CC BYNC 40](https://img.shields.io/badge/License-CC%20BY--NC%204.0-lightgrey.svg)](https://creativecommons.org/licenses/by-nc/4.0/) [![For Education](https://img.shields.io/badge/Use-Education%20%26%20Academic-green.svg)](https://creativecommons.org/licenses/by-nc/4.0/)
+[![License: CC BY-NC 4.0](https://img.shields.io/badge/License-CC%20BY--NC%204.0-lightgrey.svg)](https://creativecommons.org/licenses/by-nc/4.0/)
+[![For Education](https://img.shields.io/badge/Use-Education%20%26%20Academic-green.svg)](https://creativecommons.org/licenses/by-nc/4.0/)
 
 > Copyright (c) 2026 AICOFORGE. All rights reserved.
 > CC BY-NC 4.0 — non-commercial use only. See LICENSE.
@@ -40,7 +41,7 @@ This repository provides the infrastructure and tools for the HLS (High-Level Sy
 ## System Architecture
 
 <p align="center">
- <img src="https://github.com/user-attachments/assets/a935fdda-f26c-41cb-a25e-06a191928c2f" width="70%">
+  <img src="https://github.com/user-attachments/assets/a935fdda-f26c-41cb-a25e-06a191928c2f" width="70%">
 </p>
 
 **Access Methods**:
@@ -54,20 +55,20 @@ This repository provides the infrastructure and tools for the HLS (High-Level Sy
 
 ### Tables (5)
 
-| Table | Purpose |
-| --- | --- |
-| `hls_rules` | Rule definitions (R### official / P### user-defined) |
-| `projects` | Project information |
-| `design_iterations` | Related information for each design iteration |
-| `synthesis_results` | HLS synthesis results (II, latency, resources) |
-| `rules_effectiveness` | Rule application effectiveness tracking |
+| Table                 | Purpose                                              |
+| --------------------- | ---------------------------------------------------- |
+| `hls_rules`           | Rule definitions (R### official / P### user-defined) |
+| `projects`            | Project information                                  |
+| `design_iterations`   | Related information for each design iteration        |
+| `synthesis_results`   | HLS synthesis results (II, latency, resources)       |
+| `rules_effectiveness` | Rule application effectiveness tracking              |
 
 ### Views (2)
 
-| View | Purpose |
-| --- | --- |
-| `rule_effectiveness_summary` | Rule success rate summary (dynamically computed) |
-| `best_designs_by_type` | Best design record (lowest ii_achieved) per project_type, for quick lookup of best design baseline per type |
+| View                         | Purpose                                                                                                     |
+| ---------------------------- | ----------------------------------------------------------------------------------------------------------- |
+| `rule_effectiveness_summary` | Rule success rate summary (dynamically computed)                                                            |
+| `best_designs_by_type`       | Best design record (lowest ii_achieved) per project_type, for quick lookup of best design baseline per type |
 
 ---
 
@@ -75,11 +76,11 @@ This repository provides the infrastructure and tools for the HLS (High-Level Sy
 
 The example environment consists of 3 machines on the same LAN, accessible individually via public IP `hls-external-ip` using different port forwarding. The system administrator must first complete installation and initialization of the HLS01 Knowledge Base host (including PostgreSQL, FastAPI deployment, and rule import) before developers can retrieve data from the Knowledge Base when running Cursor automated HLS design on their Vitis-HLS hosts.
 
-| Machine | Role | LAN IP (Example) | Public Port Forwarding (Example) | Description |
-| --- | --- | --- | --- | --- |
-| **HLS01** | Knowledge Base Host | 192.168.1.11 | hls-external-ip:1100 | Administrator installed, runs PostgreSQL + FastAPI |
-| **HLS02** | Vitis-HLS Host | 192.168.1.12 | hls-external-ip:1200 | Vitis HLS installed, Cursor automated HLS design |
-| **HLS03** | Vitis-HLS Host | 192.168.1.13 | hls-external-ip:1300 | Vitis HLS installed, Cursor automated HLS design |
+| Machine   | Role                | LAN IP (Example) | Public Port Forwarding (Example) | Description                                        |
+| --------- | ------------------- | ---------------- | -------------------------------- | -------------------------------------------------- |
+| **HLS01** | Knowledge Base Host | 192.168.1.11     | hls-external-ip:1100             | Administrator installed, runs PostgreSQL + FastAPI |
+| **HLS02** | Vitis-HLS Host      | 192.168.1.12     | hls-external-ip:1200             | Vitis HLS installed, Cursor automated HLS design   |
+| **HLS03** | Vitis-HLS Host      | 192.168.1.13     | hls-external-ip:1300             | Vitis HLS installed, Cursor automated HLS design   |
 
 > Actual connection configuration can be adjusted based on environment; the network configuration above is for reference only.
 
@@ -335,9 +336,9 @@ python3 logger-rollback.py logger --project FIR_Demo --iteration 3
 
 Key notes:
 
-- `With _rollback_info: 1 | Without: 0` — all iterations have precise restoration metadata; rule statistics can be restored. if With `_rollback_info is 0`, those iterations can only be deleted without restoring statistics
-- `Total rules_effectiveness operations: 3` — 3 operations will be executed against `rules_effectiveness` during rollback
-- The database is not modified at this stage; the log is only used by the `rollback` command in the next phase
+* `With _rollback_info: 1 | Without: 0` — all iterations have precise restoration metadata; rule statistics can be restored. if With `_rollback_info is 0`, those iterations can only be deleted without restoring statistics
+* `Total rules_effectiveness operations: 3` — 3 operations will be executed against `rules_effectiveness` during rollback
+* The database is not modified at this stage; the log is only used by the `rollback` command in the next phase
 
 ### Execute Rollback
 
@@ -380,11 +381,11 @@ Proceed with rollback? [y/N]: Y
 
 Key notes:
 
-- `[✓ precise]` — `_rollback_info` is present; rule statistics can be precisely restored rather than just deleted
-- `rules_effectiveness: 3 UPDATE(restore) + 0 DELETE(new)` — all 3 rules existed before iter#3 and will be restored to their prior statistics; `DELETE(new)` would apply to rules first introduced by this iteration (none in this case)
-- `RESTORED rules_effectiveness 333574eb... (applied=1, success=1)` — after removing iter#3, rule `333574eb`'s times_applied is restored to 1 and success_count to 1
-- `[!] Project 10547eba... kept` — FIR_Demo still has 2 other iterations and is retained; if no iterations remain, it would show `DELETED project`
-- `Log file updated` — `rollback_status: completed` is appended to the YAML log as a permanent operation record
+* `[✓ precise]` — `_rollback_info` is present; rule statistics can be precisely restored rather than just deleted
+* `rules_effectiveness: 3 UPDATE(restore) + 0 DELETE(new)` — all 3 rules existed before iter#3 and will be restored to their prior statistics; `DELETE(new)` would apply to rules first introduced by this iteration (none in this case)
+* `RESTORED rules_effectiveness 333574eb... (applied=1, success=1)` — after removing iter#3, rule `333574eb`'s times_applied is restored to 1 and success_count to 1
+* `[!] Project 10547eba... kept` — FIR_Demo still has 2 other iterations and is retained; if no iterations remain, it would show `DELETED project`
+* `Log file updated` — `rollback_status: completed` is appended to the YAML log as a permanent operation record
 
 ---
 
@@ -654,12 +655,12 @@ curl "http://localhost:8000/api/rules/effective?min_success_rate=0"
 
 During rule import, priority is automatically set based on keywords in the rule text:
 
-| Priority | Trigger Keywords | Semantics |
-| --- | --- | --- |
-| 9   | `always`, `must`, `critical`, `never` | Mandatory, must not violate |
-| 7   | `do not`, `avoid`, `ensure`, `should` | Strongly recommended |
-| 5   | `consider`, `may`, `recommend`, `prefer` | Suggested, optional |
-| 4   | (no matching keyword) | Default value, general rule |
+| Priority | Trigger Keywords                         | Semantics                   |
+| -------- | ---------------------------------------- | --------------------------- |
+| 9        | `always`, `must`, `critical`, `never`    | Mandatory, must not violate |
+| 7        | `do not`, `avoid`, `ensure`, `should`    | Strongly recommended        |
+| 5        | `consider`, `may`, `recommend`, `prefer` | Suggested, optional         |
+| 4        | (no matching keyword)                    | Default value, general rule |
 
 After combining results from both tracks, Cursor AI proposes optimization approaches and precisely references rule codes (R### / P###) in the design. At `complete_iteration`stage, the applied rules are also automatically written back to `rules_effectiveness` to update success rate statistics.
 
@@ -679,12 +680,12 @@ Both `rules_ug1399.txt` and `rules_user_defined.txt` can freely add new categori
 
 `rules_user_defined.txt` is the user-defined rules file. It can include technology-oriented categories such as `pipeline` and `memory`, as well as application-specific categories such as `fir`, `systolic`, and `cordic`. Examples from actual classifications:
 
-| Category | Description | Example Rules |
-| --- | --- | --- |
-| `pipeline` | Pipeline and II optimization | P011 `PIPELINE II=1 rewind`; P018 scalar accumulation in innermost loop prohibited |
-| `memory` | Array access and partitioning | P033 off-chip access inside hot loop prohibited; P037 partition arrays per unrolled lane |
-| `fir` | FIR filter application optimization | P068 merge shift and compute loops to eliminate dependencies; P069 add `rewind` for seamless overlap |
-| `systolic` | Systolic array architecture | P083 use next-state arrays to eliminate RAW hazards; P086 input temporal skew to align PE data |
+| Category   | Description                         | Example Rules                                                                                        |
+| ---------- | ----------------------------------- | ---------------------------------------------------------------------------------------------------- |
+| `pipeline` | Pipeline and II optimization        | P011 `PIPELINE II=1 rewind`; P018 scalar accumulation in innermost loop prohibited                   |
+| `memory`   | Array access and partitioning       | P033 off-chip access inside hot loop prohibited; P037 partition arrays per unrolled lane             |
+| `fir`      | FIR filter application optimization | P068 merge shift and compute loops to eliminate dependencies; P069 add `rewind` for seamless overlap |
+| `systolic` | Systolic array architecture         | P083 use next-state arrays to eliminate RAW hazards; P086 input temporal skew to align PE data       |
 
 Technology-oriented categories such as `pipeline` and `memory` appear in both `rules_ug1399.txt` and `rules_user_defined.txt`. Application-specific categories such as `fir` and `systolic` exist only in `rules_user_defined.txt`. The API merges results from both sources automatically regardless of `official` / `user_defined`.
 
@@ -724,18 +725,18 @@ Before each HLS task, Cursor Agent automatically verifies the current environmen
 
 > ❗ **Header comment write timing**: When Cursor writes code, the .cpp file **does not contain** a file header comment — only the code body and three-line pragma comments above each `#pragma HLS`. After csim + csynth both succeed, the report is parsed for measured data, then the complete header comment is inserted at the top of .cpp (before all `#include`), and only then is code_snapshot assembled for writing to KB. All values in the header (Synthesis Result, Resources, each Optimization's Result) are measured values.
 
-| Step | Action |
-| --- | --- |
-| Step 1 | Front-Capture: scan user messages, maintain USER_REF_CODE / USER_SPEC |
-| Step 2 | Two-track query: use `/api/design/similar` for similar designs (Track 1); use `/api/rules/effective` for rules (Track 2) |
-| Step 3 | Bind Rules: bind selected rules to APPLIED_RULES; record reasoning in `cursor_reasoning` |
-| Step 4 | Propose optimization approach (based on KB knowledge and user input) |
-| Step 5 | Write code + pragma comments (three-line comment above each `#pragma HLS`; **do not write file header comment at this stage**) |
-| Step 6 | Run csim + csynth (if either fails → stop, do not record) |
-| Step 7 | Parse csynth report (II, Latency, Resources, Timing); insert complete header comment in one pass (measured values) |
-| Step 8 | Use `/api/projects` + `project_name` exact match to retrieve `project_id` (**critical** — avoids duplicate project creation) |
-| Step 9 | Call `POST /api/design/complete_iteration` |
-| Step 10 | Create / update local markdown document backup |
+| Step    | Action                                                                                                                                                               |
+| ------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Step 1  | Front-Capture: scan user messages, maintain USER_REF_CODE / USER_SPEC                                                                                                |
+| Step 2  | Two-track query: use `/api/design/similar` for similar designs (Track 1); use `/api/rules/effective` for rules (Track 2)                                             |
+| Step 3  | Bind Rules: bind selected rules to APPLIED_RULES; record reasoning in `cursor_reasoning`                                                                             |
+| Step 4  | Propose optimization approach (based on KB knowledge and user input)                                                                                                 |
+| Step 5  | Write code + pragma comments (three-line comment above each `#pragma HLS`; **do not write file header comment at this stage**)                                       |
+| Step 6  | Run csim + csynth (if either fails → stop, do not record)                                                                                                            |
+| Step 7  | Parse csynth report (II, Latency, Resources, Timing); insert complete header comment in one pass (measured values)                                                   |
+| Step 8  | Use `/api/projects` + `project_name` exact match to retrieve `project_id` (**critical** — avoids duplicate project creation)                                         |
+| Step 9  | Call `POST /api/design/complete_iteration`                                                                                                                           |
+| Step 10 | Create / update local markdown document backup                                                                 |
 | Step 11 | If II target not met, update `previous_ii` baseline from this result, select next-best pragma combination not yet tried, and return to Step 2 for the next iteration |
 
 > **Step 7 Applied Rules recording rule**: All rules that Cursor referenced or applied when reasoning about optimization direction, regardless of whether rule_code can be confirmed, must be recorded in the `code_snapshot` header's Applied Rules section. When rule_code is known, write `P###/R###: rule_text`; when rule_code cannot be confirmed, write only rule_text — omission is not allowed.
@@ -788,13 +789,13 @@ After reproduction, compare II, Latency, Resources against the original record. 
 
 The Knowledge Base is shared by all Cursor HLS Users. The success rate statistics in `rules_effectiveness` affect rule recommendations for every developer, so the following access policies apply:
 
-| Operation Type | Performer | Description |
-| --- | --- | --- |
-| Query rules / designs | Cursor HLS User | Can query anytime; does not affect shared data |
-| Write new iteration | Cursor HLS User | Only via `complete_iteration` automatic completion |
-| Update rule statistics | `complete_iteration` auto-execution | Updated internally by the API within a transaction; no standalone endpoint |
-| Rollback (remove project / iteration) | System Administrator | System administration privileges required |
-| KB backup / restore / reset | System Administrator | System administration privileges required |
+| Operation Type                        | Performer                           | Description                                                                |
+| ------------------------------------- | ----------------------------------- | -------------------------------------------------------------------------- |
+| Query rules / designs                 | Cursor HLS User                     | Can query anytime; does not affect shared data                             |
+| Write new iteration                   | Cursor HLS User                     | Only via `complete_iteration` automatic completion                         |
+| Update rule statistics                | `complete_iteration` auto-execution | Updated internally by the API within a transaction; no standalone endpoint |
+| Rollback (remove project / iteration) | System Administrator                | System administration privileges required                                  |
+| KB backup / restore / reset           | System Administrator                | System administration privileges required                                  |
 
 **Concurrent Write Safety**: When multiple developers use the Knowledge Base simultaneously, the API has built-in collision prevention. If a project with the same name already exists, the API returns **409 Conflict** with `existing_project_id`; Cursor retries `complete_iteration` with that ID, with no developer coordination needed.
 
@@ -802,19 +803,19 @@ The Knowledge Base is shared by all Cursor HLS Users. The success rate statistic
 
 Cursor AI automatically calls the appropriate endpoints based on the design phase — before design, uses `/api/design/similar` to query similar design cases (learning best optimization methods), `/api/rules/categories` to retrieve the category list, and `/api/rules/effective` to retrieve rules (Cursor-side first filters by `rule_text` semantic for on-topic rules, then sorts by success_count / times_applied / priority); after synthesis, retrieves `project_id` via Automatic Design Iteration Recording first, then uses `/api/design/complete_iteration` to complete all data writing in one call (`iteration_number` is automatically computed by the API); to view project iterations, calls `/api/analytics/.../progress`. The entire process is automatically orchestrated by Cursor Agent; developers do not need to manually execute any API calls.
 
-| Endpoint | Method | Description |
-| --- | --- | --- |
-| `/health` | GET | Health check |
-| `/api/projects` | GET | List all projects (supports type, limit, offset) |
-| `/api/projects` | POST | Create new project (Concurrent Write Safety) |
-| `/api/projects/{project_id}` | GET | Get single project details |
-| `/api/design/similar` | GET | Query similar designs (for learning; includes cursor_reasoning; excludes code_snapshot / prompt_used / user_reference_code / reference_metadata) |
-| `/api/design/{iteration_id}/code` | GET | Get full details of a specific iteration (code_snapshot, cursor_reasoning, prompt_used, user_reference_code; **excludes reference_metadata**) |
-| `/api/rules/effective` | GET | Query rules (supports rule_type filter, default min_success_rate=0.0) |
-| `/api/rules/categories` | GET | Return all category list (for two-track query category inference) |
-| `/api/design/complete_iteration` | POST | Record a complete iteration |
-| `/api/analytics/project/{project_id}/progress` | GET | Return all iteration results for a project |
-| `/docs` | GET | Swagger UI interactive documentation |
+| Endpoint                                       | Method | Description                                                                                                                                      |
+| ---------------------------------------------- | ------ | ------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `/health`                                      | GET    | Health check                                                                                                                                     |
+| `/api/projects`                                | GET    | List all projects (supports type, limit, offset)                                                                                                 |
+| `/api/projects`                                | POST   | Create new project (Concurrent Write Safety)                                                                                                     |
+| `/api/projects/{project_id}`                   | GET    | Get single project details                                                                                                                       |
+| `/api/design/similar`                          | GET    | Query similar designs (for learning; includes cursor_reasoning; excludes code_snapshot / prompt_used / user_reference_code / reference_metadata) |
+| `/api/design/{iteration_id}/code`              | GET    | Get full details of a specific iteration (code_snapshot, cursor_reasoning, prompt_used, user_reference_code; **excludes reference_metadata**)    |
+| `/api/rules/effective`                         | GET    | Query rules (supports rule_type filter, default min_success_rate=0.0)                                                                            |
+| `/api/rules/categories`                        | GET    | Return all category list (for two-track query category inference)                                                                                |
+| `/api/design/complete_iteration`               | POST   | Record a complete iteration                                                                                                                      |
+| `/api/analytics/project/{project_id}/progress` | GET    | Return all iteration results for a project                                                                                                       |
+| `/docs`                                        | GET    | Swagger UI interactive documentation                                                                                                             |
 
 > Before recording an iteration, retrieve `project_id` via Design Iteration Recording & Automation **Post-Synthesis** — never from `/api/design/similar` results, which are sorted by performance and may be owned by another project.
 
@@ -829,13 +830,12 @@ Cursor AI automatically calls the appropriate endpoints based on the design phas
 Symptom: DBeaver shows connection timeout or connection refused. Common causes and troubleshooting order:
 
 1. **SSH tunnel dropped**: Tunnels disconnect automatically after prolonged inactivity or network changes. Re-establish the tunnel in Windows CMD:
-  
-  ```bash
-  ssh -L 5432:192.168.1.11:5432 cursor2hls@hls-external-ip -p 1200
-  ```
-  
+   
+   ```bash
+   ssh -L 5432:192.168.1.11:5432 cursor2hls@hls-external-ip -p 1200
+   ```
+
 2. **PostgreSQL service not running**: SSH into the Knowledge Base host and run `docker ps` to confirm the PostgreSQL container status is `Up`; if not running, execute `docker compose up -d` in `~/hls-kb/`
-  
 
 **Cursor reports insufficient permissions or cannot execute commands**
 

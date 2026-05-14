@@ -10,7 +10,7 @@
 
 ---
 
-中文 | English
+[中文](./README-ZH.md) | English
 
 ---
 
